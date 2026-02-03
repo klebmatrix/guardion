@@ -10,10 +10,10 @@ templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
 app = FastAPI()
 
-# --- CONFIGURAÇÕES DE AMBIENTE ---
+# --- CONFIGURAÇÕES CRÍTICAS ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 PRIV_KEY = os.getenv("private_key")
-PIN_SISTEMA = os.getenv("guardiao") 
+PIN_SISTEMA = os.getenv("guardiao")
 RPC_URL = "https://polygon-rpc.com"
 
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
@@ -28,64 +28,53 @@ def registrar_log(msg, lado="AUTO"):
     try:
         agora = datetime.now().strftime("%H:%M:%S")
         log = {"data": agora, "mercado": msg, "lado": lado}
-        historico = []
+        dados = []
         if os.path.exists("logs.json"):
-            with open("logs.json", "r") as f: historico = json.load(f)
-        historico.insert(0, log)
-        with open("logs.json", "w") as f: json.dump(historico[:15], f)
+            with open("logs.json", "r") as f: dados = json.load(f)
+        dados.insert(0, log)
+        with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
-# --- MOTOR DE TIRO REAL (GATILHO) ---
+# --- MOTOR DE TIRO REAL ---
 async def bot_engine():
     while True:
         if bot_config["status"] == "ON" and PRIV_KEY:
             try:
-                # 1. Checa se o robô tem permissão de gasto (Allowance)
-                contract = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(ABI_COMPLETA))
-                allowance = contract.functions.allowance(WALLET, SPENDER_POLYM).call()
-                
-                if allowance < 600000: # Se não tiver 0.60 USDC liberado
-                    registrar_log("Sistema: Autorizando USDC...", "SISTEMA")
-                    tx_app = contract.functions.approve(SPENDER_POLYM, 10**12).build_transaction({
-                        'from': WALLET, 'nonce': w3.eth.get_transaction_count(WALLET),
-                        'gas': 100000, 'gasPrice': w3.eth.gas_price
-                    })
-                    signed = w3.eth.account.sign_transaction(tx_app, PRIV_KEY)
-                    w3.eth.send_raw_transaction(signed.rawTransaction)
-                    await asyncio.sleep(20)
-
-                # 2. EXECUÇÃO DO TIRO DE 0.60 USDC
-                # Aqui o bot assina e envia para a rede
-                registrar_log("Sniper: EXECUTANDO 0.60 USDC", "YES")
-                
-                # Exemplo de transação de envio real que consome POL e USDC
-                tx_tiro = {
-                    'nonce': w3.eth.get_transaction_count(WALLET),
-                    'to': SPENDER_POLYM,
+                # 1. TENTA ASSINAR UM TIRO TESTE DE 0.60 USDC
+                nonce = w3.eth.get_transaction_count(WALLET)
+                tx = {
+                    'nonce': nonce,
+                    'to': w3.to_checksum_address(SPENDER_POLYM),
                     'value': 0,
-                    'gas': 250000,
+                    'gas': 200000,
                     'gasPrice': w3.eth.gas_price,
-                    'data': '0x' # Espaço para o comando da Polymarket
+                    'chainId': 137,
+                    'data': '0x' # Comando vazio para testar o envio de Gas
                 }
-                signed_tiro = w3.eth.account.sign_transaction(tx_tiro, PRIV_KEY)
-                w3.eth.send_raw_transaction(signed_tiro.rawTransaction)
+                
+                signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
+                tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+                
+                registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
                 
             except Exception as e:
-                registrar_log(f"Falha Real: {str(e)[:20]}", "ERRO")
+                # Se falhar, o erro vai aparecer no seu Histórico do Dashboard
+                erro_msg = str(e).split(' ')[0] # Pega o início do erro
+                registrar_log(f"FALHA NO GATILHO: {erro_msg}", "ERRO")
         
-        await asyncio.sleep(300)
+        await asyncio.sleep(60) # Tenta a cada 1 minuto para testarmos rápido
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(bot_engine())
 
-# --- INTERFACE ---
+# --- ROTAS ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
 async def auth(pin: str = Form(...)):
     if pin == PIN_SISTEMA: return RedirectResponse(url="/dashboard", status_code=303)
-    return "Acesso Negado"
+    return "ACESSO NEGADO"
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):

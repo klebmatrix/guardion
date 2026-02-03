@@ -7,38 +7,49 @@ import uvicorn
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# Sua regra: variáveis em minúsculas no Render
+# Sua regra: variável em minúsculas
 PIN_SISTEMA = os.getenv("guardiao", "123456")
 
-# Simulação de dados para o seu HTML mobile
+# Dados voláteis para o dashboard funcionar
 dados_bot = {"status": "OFF", "preference": "YES"}
-mercados_exemplo = [
-    {"id": "1", "question": "O Bitcoin atinge 100k em Fevereiro?", "slug": "btc-100k-feb"},
-    {"id": "2", "question": "POL vai subir 20% esta semana?", "slug": "pol-up-20"}
+mercados = [
+    {"id": "1", "question": "Bitcoin acima de 100k?", "slug": "btc-100k", "id": "m1"},
+    {"id": "2", "question": "POL sobe hoje?", "slug": "pol-up", "id": "m2"}
 ]
 
 @app.get("/", response_class=HTMLResponse)
-async def tela_login(request: Request):
+async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
-async def entrar(pin: str = Form(...)):
+async def validar_login(pin: str = Form(...)):
     if pin == PIN_SISTEMA:
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<h1>PIN INCORRETO</h1><a href='/'>Tentar novamente</a>")
+    return HTMLResponse("<h1>PIN INCORRETO</h1><a href='/'>Voltar</a>")
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard_page(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "wallet": "0x...E43E", # Sua carteira
-        "usdc": "14.44",        # Seu saldo
-        "pol": "1.25",          # Saldo de gás
+        "wallet": "0x...E43E",
+        "usdc": "14.44",
+        "pol": "1.25",
         "bot": dados_bot,
-        "markets": mercados_exemplo,
-        "aviso": "Sistema Operacional Guardião Pronto para Trades."
+        "markets": mercados
     })
 
+@app.post("/toggle_bot")
+async def atualizar_setup(status: str = Form(...), preference: str = Form(...)):
+    global dados_bot
+    dados_bot["status"] = status
+    dados_bot["preference"] = preference
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+@app.post("/trade")
+async def realizar_trade(market_id: str = Form(...), amount: float = Form(...), side: str = Form(...)):
+    print(f"Trade recebido: {amount} USDC no lado {side}")
+    return RedirectResponse(url="/dashboard", status_code=303)
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)

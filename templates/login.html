@@ -1,18 +1,10 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Guardião - Acesso</title>
-</head>
-<body style="text-align: center; margin-top: 100px; font-family: Arial;">
-    <h2>Acesso ao Sistema</h2>
-    
-    {% if erro %}
-        <p style="color: red;">{{ erro }}</p>
-    {% endif %}
-
+<head><title>Acesso Guardião</title></head>
+<body style="text-align: center; margin-top: 100px; background: #0f172a; color: white; font-family: sans-serif;">
+    <h2>Terminal de Acesso</h2>
     <form action="/entrar" method="post">
-        <input type="password" name="pin" placeholder="PIN de 6 dígitos" required 
-               style="padding: 10px; border-radius: 5px;">
+        <input type="password" name="pin" placeholder="Digite o PIN" required style="padding: 10px;">
         <br><br>
         <button type="submit" style="padding: 10px 20px;">ENTRAR</button>
     </form>

@@ -1,13 +1,19 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>Guardião - Login</title>
+</head>
 <body>
-    <img src="https://via.placeholder.com/1200x120/3b82f6/ffffff?text=OPENCLAW+HEADER" style="width:100%">
-    
-    <div style="text-align: center; margin-top: 50px;">
-        <h2>🛡️ Login Guardião</h2>
-        {% if erro %}<p style="color:red">{{ erro }}</p>{% endif %}
-        <form action="/entrar" method="post">
-            <input type="password" name="senha" placeholder="Chave Mestra" required>
+    <div style="text-align: center; margin-top: 100px;">
+        <h2>Acesso ao Sistema Guardião</h2>
+        
+        {% if erro %}
+            <p style="color: red;">{{ erro }}</p>
+        {% endif %}
+
+        <form action="/login" method="post">
+            <input type="password" name="pin" placeholder="PIN de 6 dígitos" required>
+            <br><br>
             <button type="submit">Entrar</button>
         </form>
     </div>

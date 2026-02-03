@@ -15,12 +15,10 @@ WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 private_key = os.getenv("private_key", "").strip() 
 guardiao = os.getenv("guardiao") 
 
-RPC_URL = "https://polygon-rpc.com"
-USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-SPENDER_POLYM = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
-
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 bot_config = {"status": "OFF"}
+
+SPENDER_POLYM = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
 
 def registrar_log(msg, lado="AUTO"):
     try:
@@ -33,12 +31,11 @@ def registrar_log(msg, lado="AUTO"):
         with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
-# --- MOTOR DE TIRO REAL ---
+# --- MOTOR DE TIRO (CORREÇÃO DO OBJETO DE ASSINATURA) ---
 async def bot_engine():
     while True:
         if bot_config["status"] == "ON" and private_key:
             try:
-                # Ajusta o formato da chave hexadecimal
                 key = private_key if private_key.startswith('0x') else '0x' + private_key
                 
                 tx = {
@@ -50,12 +47,18 @@ async def bot_engine():
                     'chainId': 137
                 }
                 
-                # Assinatura usando a variável CORRETA
+                # ASSINATURA
                 signed_tx = w3.eth.account.sign_transaction(tx, key)
-                tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
                 
-                registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
+                # CORREÇÃO AQUI: Tenta extrair o rawTransaction de forma segura
+                raw = getattr(signed_tx, 'raw_transaction', getattr(signed_tx, 'rawTransaction', None))
                 
+                if raw:
+                    tx_hash = w3.eth.send_raw_transaction(raw)
+                    registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
+                else:
+                    registrar_log("ERRO: Falha no RawTx", "ERRO")
+                    
             except Exception as e:
                 registrar_log(f"ERRO: {str(e)[:25]}", "ERRO")
         
@@ -64,32 +67,24 @@ async def bot_engine():
 @app.on_event("startup")
 async def startup(): asyncio.create_task(bot_engine())
 
-# --- INTERFACE ---
-@app.get("/dashboard", response_class=HTMLResponse)
-async def painel(request: Request):
-    try:
-        pol = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
-    except: pol = "0.00"
-    
-    logs = []
-    if os.path.exists("logs.json"):
-        with open("logs.json", "r") as f: logs = json.load(f)
-
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "wallet": WALLET, "usdc": "14.44", "pol": pol,
-        "bot": bot_config, "historico": logs, "total_ops": len(logs),
-        "ops_yes": sum(1 for l in logs if l['lado'] == 'YES'),
-        "ops_no": sum(1 for l in logs if l['lado'] == 'NO'),
-        "ops_erro": sum(1 for l in logs if l['lado'] == 'ERRO')
-    })
+# --- ROTAS ---
+@app.get("/")
+async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
 async def auth(pin: str = Form(...)):
     if pin == guardiao: return RedirectResponse(url="/dashboard", status_code=303)
     return "Negado"
 
-@app.get("/")
-async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})
+@app.get("/dashboard", response_class=HTMLResponse)
+async def painel(request: Request):
+    try:
+        pol = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
+    except: pol = "0.00"
+    logs = []
+    if os.path.exists("logs.json"):
+        with open("logs.json", "r") as f: logs = json.load(f)
+    return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "usdc": "14.44", "pol": pol, "bot": bot_config, "historico": logs})
 
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):

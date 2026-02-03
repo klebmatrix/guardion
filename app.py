@@ -13,7 +13,7 @@ app = FastAPI()
 # --- CONFIGURAÇÕES DO RENDER ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 # Limpa a chave de qualquer espaço que venha do copiar/colar
-PRIV_KEY = os.getenv("private_key", "").strip()
+PRIV_key = os.getenv("private_key", "").strip()
 PIN_SISTEMA = os.getenv("guardiao")
 RPC_URL = "https://polygon-rpc.com"
 

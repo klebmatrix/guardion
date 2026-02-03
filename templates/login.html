@@ -1,12 +1,142 @@
 <!DOCTYPE html>
-<html>
-<head><title>Acesso Guardião</title></head>
-<body style="text-align: center; margin-top: 100px; background: #0f172a; color: white; font-family: sans-serif;">
-    <h2>Terminal de Acesso</h2>
-    <form action="/entrar" method="post">
-        <input type="password" name="pin" placeholder="Digite o PIN" required style="padding: 10px;">
-        <br><br>
-        <button type="submit" style="padding: 10px 20px;">ENTRAR</button>
-    </form>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sniper Bot - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        
+        .login-container {
+            background: rgba(0, 255, 136, 0.05);
+            border: 2px solid #00ff88;
+            border-radius: 15px;
+            padding: 40px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+        }
+        
+        .login-container h1 {
+            text-align: center;
+            color: #00ff88;
+            margin-bottom: 10px;
+            font-size: 28px;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+        
+        .login-container p {
+            text-align: center;
+            color: #aaa;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #00ff88;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #00ff88;
+            border-radius: 6px;
+            background: rgba(0, 255, 136, 0.1);
+            color: #fff;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #00dd77;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+            background: rgba(0, 255, 136, 0.15);
+        }
+        
+        .form-group input::placeholder {
+            color: rgba(0, 255, 136, 0.5);
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #00ff88 0%, #00dd77 100%);
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+        }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
+        .info-text {
+            text-align: center;
+            color: #00ff88;
+            font-size: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 255, 136, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>⚡ Sniper Bot</h1>
+        <p>Acesso ao Painel de Controle</p>
+        
+        <form method="post" action="/entrar">
+            <div class="form-group">
+                <label for="pin">PIN de Acesso:</label>
+                <input 
+                    type="password" 
+                    id="pin" 
+                    name="pin" 
+                    placeholder="Digite seu PIN" 
+                    required
+                    autofocus
+                >
+            </div>
+            
+            <button type="submit" class="btn-login">🔓 Entrar</button>
+        </form>
+        
+        <div class="info-text">
+            🔒 Seu acesso é protegido por PIN criptografado
+        </div>
+    </div>
 </body>
 </html>

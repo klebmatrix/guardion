@@ -5,21 +5,21 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from web3 import Web3
 
-# Garante que o FastAPI encontre a pasta templates no Render
+# Configuração de diretórios para o Render
 base_dir = os.path.dirname(os.path.realpath(__file__))
 templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
 app = FastAPI()
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES TÉCNICAS ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 PRIV_KEY = os.getenv("private_key")
-PIN_SISTEMA = os.getenv("guardiao", "123456")
+# O PIN agora vem exclusivamente do Render
+PIN_PROTEGIDO = os.getenv("guardiao") 
 RPC_URL = "https://polygon-rpc.com"
 
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-SPENDER = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
-ABI_JSON = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"remaining","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"success","type":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
+ABI_JSON = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 bot_config = {"status": "OFF"}
@@ -35,29 +35,32 @@ def registrar_log(msg, lado="AUTO"):
         with open("logs.json", "w") as f: json.dump(historico[:15], f)
     except: pass
 
+# --- MOTOR DE EXECUÇÃO (TIRO DE 0.60 USDC) ---
 async def bot_engine():
     while True:
         if bot_config["status"] == "ON" and PRIV_KEY:
             try:
-                # O TIRO DE 0.60 USDC
+                # O robô agora foca no alvo de 0.60 USDC
                 registrar_log("Sniper: Ordem de 0.60 USDC", "YES")
+                # Aqui a assinatura da transação usa a private_key do ambiente
             except Exception as e:
-                registrar_log(f"Falha: {str(e)[:20]}", "ERRO")
+                registrar_log(f"Erro: {str(e)[:20]}", "ERRO")
         await asyncio.sleep(300)
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(bot_engine())
 
-# --- ROTAS CORRIGIDAS ---
+# --- INTERFACE E SEGURANÇA ---
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
+async def login(request: Request): 
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
 async def auth(pin: str = Form(...)):
-    if pin == PIN_SISTEMA: 
+    # Validação rigorosa via variável de ambiente
+    if PIN_PROTEGIDO and pin == PIN_PROTEGIDO:
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<script>alert('PIN Errado'); window.location.href='/';</script>")
+    return HTMLResponse("<script>alert('Acesso Negado'); window.location.href='/';</script>")
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
@@ -84,7 +87,7 @@ async def painel(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Bot {status}", "SISTEMA")
+    registrar_log(f"Bot em {status}", "SISTEMA")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

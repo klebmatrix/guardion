@@ -5,41 +5,41 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from web3 import Web3
 
-# Tenta encontrar a pasta de templates de qualquer jeito para evitar o Error 500
 base_dir = os.path.dirname(os.path.realpath(__file__))
-temp_path = os.path.join(base_dir, "templates")
-if not os.path.exists(temp_path):
-    os.makedirs(temp_path, exist_ok=True)
-
-templates = Jinja2Templates(directory=temp_path)
+templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
 app = FastAPI()
 
-# --- VARIÁVEIS DO RENDER ---
+# --- CONFIGURAÇÕES RENDER ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 private_key = os.getenv("private_key", "").strip() 
 guardiao = os.getenv("guardiao") 
 
-# Conexão Web3
+# RPC Polygon Estável
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 bot_config = {"status": "OFF"}
+
+USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 SPENDER_POLYM = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
+
+# ABI Mínima para Saldo USDC
+ABI_USDC = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
 
 def registrar_log(msg, lado="AUTO"):
     try:
         agora = datetime.now().strftime("%H:%M:%S")
         log = {"data": agora, "mercado": msg, "lado": lado}
-        dados = []
+        historico = []
         if os.path.exists("logs.json"):
-            with open("logs.json", "r") as f: dados = json.load(f)
-        dados.insert(0, log)
-        with open("logs.json", "w") as f: json.dump(dados[:15], f)
+            with open("logs.json", "r") as f: historico = json.load(f)
+        historico.insert(0, log)
+        with open("logs.json", "w") as f: json.dump(historico[:15], f)
     except: pass
 
-# --- MOTOR DE TIRO (BLINDADO) ---
+# --- MOTOR DE TIRO REAL ---
 async def bot_engine():
     while True:
-        if bot_config["status"] == "ON" and private_key and len(private_key) > 10:
+        if bot_config["status"] == "ON" and private_key:
             try:
                 key = private_key if private_key.startswith('0x') else '0x' + private_key
                 tx = {
@@ -57,7 +57,7 @@ async def bot_engine():
                     registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
             except Exception as e:
                 registrar_log(f"ERRO: {str(e)[:15]}", "ERRO")
-        await asyncio.sleep(60)
+        await asyncio.sleep(300) # Ciclo de 5 minutos
 
 @app.on_event("startup")
 async def startup():
@@ -66,20 +66,22 @@ async def startup():
 # --- ROTAS ---
 @app.get("/")
 async def home(request: Request):
-    try:
-        return templates.TemplateResponse("login.html", {"request": request})
-    except:
-        return HTMLResponse("<body><h1>Sniper Ativo</h1><form action='/entrar' method='post'>PIN: <input name='pin'><button>Entrar</button></form></body>")
+    return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
 async def auth(pin: str = Form(...)):
     if pin == guardiao: return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("Acesso Negado")
+    return "Acesso Negado"
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
-    pol = "4.00"
-    try: pol = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
+    pol, usdc = "0.00", "0.00"
+    try:
+        # Puxa POL real
+        pol = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
+        # Puxa USDC real via Contrato
+        c = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(ABI_USDC))
+        usdc = f"{c.functions.balanceOf(WALLET).call() / 10**6:.2f}"
     except: pass
     
     logs = []
@@ -87,7 +89,7 @@ async def painel(request: Request):
         with open("logs.json", "r") as f: logs = json.load(f)
 
     return templates.TemplateResponse("dashboard.html", {
-        "request": request, "wallet": WALLET, "usdc": "14.44", "pol": pol,
+        "request": request, "wallet": WALLET, "usdc": usdc, "pol": pol,
         "bot": bot_config, "historico": logs, "total_ops": len(logs),
         "ops_yes": sum(1 for l in logs if l['lado'] == 'YES'),
         "ops_no": sum(1 for l in logs if l['lado'] == 'NO'),

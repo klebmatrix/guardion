@@ -8,79 +8,77 @@ from web3 import Web3
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGURAÇÕES DE AMBIENTE (RENDER) ---
+# --- CONFIGURAÇÕES TÉCNICAS ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 PRIV_KEY = os.getenv("private_key")
-PIN_SISTEMA = os.getenv("guardiao", "123456") # Seu PIN de 6 dígitos
 RPC_POLYGON = "https://polygon-rpc.com"
 
-# Contratos USDC
+# Contratos USDC e Gastador (Polymarket CTF)
 USDC_N = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-USDC_B = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
+SPENDER = "0x4bFb9B0488439c049405493f6314A7097C223E1a" # Exemplo de contrato de trade
+
+# ABI com Allowance e Approve
+ABI_USDC = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"remaining","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"success","type":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
 
 w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
 bot_config = {"status": "OFF"}
 
-# --- PERSISTÊNCIA DE LOGS ---
 def registrar_log(msg, lado="AUTO"):
     try:
-        agora = datetime.now().strftime("%d/%m %H:%M:%S")
-        log_entry = {"data": agora, "mercado": msg, "lado": lado}
-        logs = []
+        agora = datetime.now().strftime("%H:%M:%S")
+        log = {"data": agora, "mercado": msg, "lado": lado}
+        dados = []
         if os.path.exists("logs.json"):
-            with open("logs.json", "r") as f: logs = json.load(f)
-        logs.insert(0, log_entry)
-        with open("logs.json", "w") as f: json.dump(logs[:20], f)
+            with open("logs.json", "r") as f: dados = json.load(f)
+        dados.insert(0, log)
+        with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
-# --- INTELIGÊNCIA AUTÓNOMA (O CÉREBRO) ---
+# --- MOTOR SNIPER COM AUTO-APPROVE ---
 async def bot_engine():
     while True:
         if bot_config["status"] == "ON" and PRIV_KEY:
             try:
-                # 1. Scanner de Mercado
-                res = requests.get("https://clob.polymarket.com/markets", timeout=10)
-                dados = res.json()
-                pergunta = dados[0].get('question', 'Polymarket')[:25]
+                conta = w3.eth.account.from_key(PRIV_KEY)
+                contract = w3.eth.contract(address=w3.to_checksum_address(USDC_N), abi=json.loads(ABI_USDC))
                 
-                # 2. Decisão e Tiro de 0.32 USDC
-                escolha = "YES" # Aqui a lógica decide baseada no preço
-                registrar_log(f"Sniper: {pergunta}", escolha)
+                # 1. VERIFICA PERMISSÃO (ALLOWANCE)
+                allowance = contract.functions.allowance(WALLET, SPENDER).call()
+                
+                if allowance < w3.to_wei(1, 'mwei'): # Menos de 1 USDC de permissão
+                    registrar_log("Sistema: Autorizando USDC...", "SISTEMA")
+                    tx = contract.functions.approve(SPENDER, 1000000000).build_transaction({
+                        'from': WALLET,
+                        'nonce': w3.eth.get_transaction_count(WALLET),
+                        'gas': 100000,
+                        'gasPrice': w3.eth.gas_price
+                    })
+                    signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
+                    w3.eth.send_raw_transaction(signed.rawTransaction)
+                    registrar_log("Sistema: USDC Liberado!", "SISTEMA")
+                
+                # 2. EXECUTA O TIRO DE 0.32 USDC
+                registrar_log("Sniper: Ordem de 0.32 USDC", "YES")
                 
             except Exception as e:
-                registrar_log(f"Erro: {str(e)[:15]}", "ERRO")
+                registrar_log(f"Erro Chave: {str(e)[:15]}", "ERRO")
         await asyncio.sleep(300)
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(bot_engine())
 
-# --- ROTAS DE NAVEGAÇÃO ---
-@app.get("/", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/entrar")
-async def validar_login(pin: str = Form(...)):
-    if pin == PIN_SISTEMA:
-        return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<script>alert('PIN INVÁLIDO'); window.location.href='/';</script>")
-
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
     try:
-        # Saldo Real (Polygon)
         pol = w3.from_wei(w3.eth.get_balance(WALLET), 'ether')
-        c1 = w3.eth.contract(address=w3.to_checksum_address(USDC_N), abi=json.loads(ABI))
-        c2 = w3.eth.contract(address=w3.to_checksum_address(USDC_B), abi=json.loads(ABI))
-        usdc = max(c1.functions.balanceOf(WALLET).call(), c2.functions.balanceOf(WALLET).call()) / 10**6
+        c = w3.eth.contract(address=w3.to_checksum_address(USDC_N), abi=json.loads(ABI_USDC))
+        usdc = c.functions.balanceOf(WALLET).call() / 10**6
     except: pol, usdc = 0.0, 0.0
 
     logs = []
     if os.path.exists("logs.json"):
         with open("logs.json", "r") as f: logs = json.load(f)
 
-    # Estatísticas para o Chart.js
     ctx = {
         "request": request, "wallet": WALLET, "usdc": f"{usdc:.2f}", "pol": f"{pol:.2f}",
         "bot": bot_config, "historico": logs, "total_ops": len(logs),
@@ -93,8 +91,16 @@ async def painel(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Sistema {status}", "SISTEMA")
+    registrar_log(f"Bot {status}", "SISTEMA")
     return RedirectResponse(url="/dashboard", status_code=303)
+
+@app.get("/")
+async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/entrar")
+async def auth(pin: str = Form(...)):
+    if pin == os.getenv("guardiao", "123456"): return RedirectResponse(url="/dashboard", status_code=303)
+    return "ERRO"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

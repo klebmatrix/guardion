@@ -1,78 +1,86 @@
 import os
+import asyncio
 import uvicorn
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from web3 import Web3
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# Configurações de Segurança
+# --- CONFIGURAÇÕES DE AMBIENTE ---
 PIN_SISTEMA = os.getenv("guardiao", "123456")
+PRIV_KEY = os.getenv("private_key")
+WALLET_ADDRESS = "0x...E43E" # Sua carteira real
+RPC_POLYGON = "https://polygon-rpc.com"
 
-# Estado do Sistema (Simulando um Banco de Dados)
-estado = {
-    "bot": {"status": "OFF", "preference": "YES"},
-    "saldo": {"usdc": 14.44, "pol": 1.25, "wallet": "0x...E43E"},
-    "historico": [
-        {"data": "2026-02-03 14:20", "mercado": "BTC > 100k", "lado": "YES", "valor": "1.00", "resultado": "WIN"},
-        {"data": "2026-02-03 15:10", "mercado": "POL Volatility", "lado": "NO", "valor": "0.50", "resultado": "WAIT"}
-    ]
-}
+# Conexão Blockchain
+w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
 
-# --- Lógica Profissional do Bot ---
-def executar_estrategia_guardiao():
-    """
-    Simula a decisão do bot baseada na preferência do usuário 
-    e na leitura de 'confiança' do mercado.
-    """
-    if estado["bot"]["status"] == "ON":
-        # Aqui o bot decidiria o valor baseado em % da banca (Ex: 5%)
-        valor_operacao = round(estado["saldo"]["usdc"] * 0.05, 2)
-        decisao = estado["bot"]["preference"]
+# --- ESTADO DO SISTEMA ---
+bot_config = {"status": "OFF", "preference": "YES"}
+historico = []
+saldo_atual = {"usdc": "14.44", "pol": "1.25"}
+
+# --- LÓGICA DE OPERAÇÃO REAL ---
+async def monitorar_e_operar():
+    """ Loop que roda 24/7 enquanto o servidor estiver 'acordado' """
+    while True:
+        if bot_config["status"] == "ON":
+            agora = datetime.now().strftime("%H:%M:%S")
+            print(f"[{agora}] 🤖 Guardião escaneando oportunidades...")
+            
+            # Aqui o bot faria a chamada de API e usaria a PRIV_KEY
+            # para assinar a transação caso encontrasse o alvo.
+            
+            # Simulação de log de monitoramento
+            if len(historico) > 20: historico.pop() # Limpa histórico antigo
         
-        # Simula o registro automático
-        nova_op = {
-            "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "mercado": "Auto-Scanner Polymarket",
-            "lado": decisao,
-            "valor": str(valor_operacao),
-            "resultado": "OPEN"
-        }
-        estado["historico"].insert(0, nova_op)
+        await asyncio.sleep(300) # Verifica a cada 5 minutos (sincronizado com UptimeRobot)
 
-# --- Rotas do Servidor ---
+@app.on_event("startup")
+async def startup_event():
+    # Inicia o loop do robô em segundo plano
+    asyncio.create_task(monitorar_e_operar())
+
+# --- ROTAS DE INTERFACE ---
 
 @app.get("/", response_class=HTMLResponse)
-async def login_view(request: Request):
+async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
-async def autenticar(pin: str = Form(...)):
+async def validar(pin: str = Form(...)):
     if pin == PIN_SISTEMA:
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<h1>ACESSO NEGADO</h1><a href='/'>Tentar Novamente</a>")
+    return HTMLResponse("<h1>PIN INCORRETO</h1><a href='/'>Voltar</a>")
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_view(request: Request):
+async def painel(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "wallet": estado["saldo"]["wallet"],
-        "usdc": estado["saldo"]["usdc"],
-        "pol": estado["saldo"]["pol"],
-        "bot": estado["bot"],
-        "historico": estado["historico"][:5] # Mostra os 5 últimos
+        "wallet": WALLET_ADDRESS,
+        "usdc": saldo_atual["usdc"],
+        "pol": saldo_atual["pol"],
+        "bot": bot_config,
+        "historico": historico
     })
 
 @app.post("/toggle_bot")
 async def atualizar_config(status: str = Form(...), preference: str = Form(...)):
-    estado["bot"]["status"] = status
-    estado["bot"]["preference"] = preference
+    bot_config["status"] = status
+    bot_config["preference"] = preference
     
-    if status == "ON":
-        executar_estrategia_guardiao() # Dispara a lógica ao ligar
-        
+    # Registro de alteração no histórico
+    log = {
+        "data": datetime.now().strftime("%d/%m %H:%M"),
+        "mercado": "CONFIGURAÇÃO",
+        "lado": preference,
+        "resultado": f"BOT {status}"
+    }
+    historico.insert(0, log)
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

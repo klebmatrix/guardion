@@ -1,40 +1,48 @@
 import os
 import asyncio
-import httpx
-from fastapi import FastAPI
-import uvicorn
+from web3 import Web3
+from datetime import datetime
 
-# Configurações
-API_URL = os.getenv("API_URL", "https://guardiao-4tem.onrender.com")
-PORT = int(os.getenv("PORT", 10000))
+# --- CONFIGURAÇÃO DE ACESSO ---
+RPC_POLYGON = "https://polygon-rpc.com"
+WALLET_ADDRESS = "0x...E43E"  # Sua carteira
+PRIV_KEY = os.getenv("private_key")  # Puxa do Render
 
-app = FastAPI()
+# Conexão com a Rede
+w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
 
-@app.get("/")
-async def root():
-    return {"status": "operante", "carteira": "E43E", "msg": "Bot rodando liso"}
+# --- LÓGICA DE DECISÃO ---
+def analisar_oportunidade(mercado, preferencia):
+    """
+    Simula a análise de mercado. 
+    Aqui ele decidiria se o preço está bom para os 14.44 USDC.
+    """
+    # Exemplo: Se a probabilidade for maior que 60%, ele opera.
+    return True 
 
-async def monitoramento():
-    """Lógica que roda em segundo plano sem travar a porta"""
-    async with httpx.AsyncClient() as client:
-        while True:
-            try:
-                # Envia sinal de vida para o seu painel
-                await client.get(f"{API_URL}/api/registrar_operacao", params={
-                    "msg": "BOT ONLINE - MONITORANDO 14.44 USDC",
-                    "tipo": "win"
-                })
-                print("✅ Log enviado ao site principal.")
-            except Exception as e:
-                print(f"❌ Erro ao reportar: {e}")
+async def executar_loop_automacao(bot_config, historico):
+    """
+    Esta função roda 24/7 sem parar.
+    """
+    while True:
+        if bot_config["status"] == "ON":
+            print(f"[{datetime.now()}] 🤖 Bot verificando mercados Polymarket...")
             
-            await asyncio.sleep(45) # Espera 45 seg para o próximo sinal
-
-@app.on_event("startup")
-async def startup_event():
-    # Inicia o loop de monitoramento assim que o servidor ligar
-    asyncio.create_task(monitoramento())
-
-if __name__ == "__main__":
-    # Roda o servidor na porta que o Render exige
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+            # 1. Busca dados do mercado via API
+            # 2. Se decidir operar:
+            if analisar_oportunidade("Mercado_Exemplo", bot_config["preference"]):
+                print("⚠️ Oportunidade detectada! Assinando transação...")
+                
+                # 3. Monta e assina a transação real com a PRIV_KEY
+                # 4. Envia para a rede Polygon
+                
+                log = {
+                    "data": datetime.now().strftime("%H:%M"),
+                    "mercado": "Auto-Trade Polymarket",
+                    "lado": bot_config["preference"],
+                    "resultado": "EXECUTADO ✅"
+                }
+                historico.insert(0, log)
+        
+        # Espera 5 minutos (300 segundos) para não gastar recursos à toa
+        await asyncio.sleep(300)

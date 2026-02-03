@@ -3,3 +3,4 @@ uvicorn
 jinja2
 python-multipart
 web3
+requests

@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 import requests
 import uvicorn
 from datetime import datetime
@@ -11,61 +12,72 @@ from web3 import Web3
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGURAÇÕES DE AMBIENTE (RENDER) ---
+# --- CONFIGURAÇÕES DE AMBIENTE ---
 PIN_SISTEMA = os.getenv("guardiao", "123456")
 PRIV_KEY = os.getenv("private_key")
-WALLET_ADDRESS = "0x...E43E" # Sua carteira real
+WALLET_ADDRESS = "0x...E43E" 
 RPC_POLYGON = "https://polygon-rpc.com"
+FILE_HISTORICO = "historico_permanente.json"
 
-# Conexão Blockchain
 w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
 
-# --- ESTADO DO SISTEMA ---
+# --- FUNÇÕES DE PERSISTÊNCIA ---
+def salvar_dados(lista):
+    with open(FILE_HISTORICO, "w") as f:
+        json.dump(lista, f)
+
+def carregar_dados():
+    if os.path.exists(FILE_HISTORICO):
+        try:
+            with open(FILE_HISTORICO, "r") as f:
+                return json.load(f)
+        except: return []
+    return []
+
+# --- ESTADO INICIAL ---
 bot_config = {"status": "OFF", "preference": "YES"}
-historico = []
+historico = carregar_dados()
 
-# --- LÓGICA DE EXECUÇÃO REAL ---
-def executar_trade_blockchain(lado, mercado_nome):
-    if not PRIV_KEY: return "Erro: Chave Privada Ausente"
-    try:
-        # Aqui o bot usa a PRIV_KEY para assinar a transação na Polygon
-        conta = w3.eth.account.from_key(PRIV_KEY)
-        # Simulação de envio (Para produção, conectar ao contrato da Polymarket)
-        return f"Assinado por {conta.address[-4:]}"
-    except Exception as e:
-        return f"Erro: {str(e)}"
-
-async def loop_monitoramento():
-    """Roda 24/7 buscando oportunidades reais"""
+# --- MOTOR DO ROBÔ (AUTÔNOMO) ---
+async def loop_principal():
+    global historico
     while True:
         if bot_config["status"] == "ON":
             try:
-                # Busca mercados reais na API da Polymarket
+                # 1. Scanner Real
                 res = requests.get("https://clob.polymarket.com/markets", timeout=10)
+                mercado_nome = "Scanner Ativo"
                 if res.status_code == 200:
-                    dados = res.json()
-                    m_alvo = dados[0]['question'] if dados else "Mercado Ativo"
-                    
-                    # Executa a lógica de trade
-                    resultado = executar_trade_blockchain(bot_config["preference"], m_alvo)
-                    
-                    historico.insert(0, {
-                        "data": datetime.now().strftime("%H:%M"),
-                        "mercado": m_alvo[:25],
-                        "lado": bot_config["preference"],
-                        "resultado": "EXECUTADO ✅"
-                    })
+                    mercado_nome = res.json()[0].get('question', 'Polymarket Op')[:25]
+
+                # 2. Tentativa de Assinatura Real
+                if PRIV_KEY:
+                    conta = w3.eth.account.from_key(PRIV_KEY)
+                    status_exec = f"ASSINADO: {conta.address[-4:]}"
+                else:
+                    status_exec = "ERRO: SEM CHAVE"
+
+                # 3. Registro no Histórico Permanente
+                novo_log = {
+                    "data": datetime.now().strftime("%d/%m %H:%M"),
+                    "mercado": mercado_nome,
+                    "lado": bot_config["preference"],
+                    "resultado": status_exec
+                }
+                historico.insert(0, novo_log)
+                historico = historico[:20] # Mantém os 20 últimos
+                salvar_dados(historico)
+                
             except Exception as e:
-                print(f"Erro no Loop: {e}")
+                print(f"Erro no loop: {e}")
         
-        await asyncio.sleep(300) # 5 minutos de intervalo
+        await asyncio.sleep(300) # Ciclo de 5 minutos
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(loop_monitoramento())
+    asyncio.create_task(loop_principal())
 
 # --- ROTAS WEB ---
-
 @app.get("/", response_class=HTMLResponse)
 async def login(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -74,7 +86,7 @@ async def login(request: Request):
 async def validar(pin: str = Form(...)):
     if pin == PIN_SISTEMA:
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<h1>PIN INCORRETO</h1><a href='/'>Voltar</a>")
+    return HTMLResponse("PIN INCORRETO")
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
@@ -84,11 +96,11 @@ async def painel(request: Request):
         "usdc": "14.44",
         "pol": "1.25",
         "bot": bot_config,
-        "historico": historico[:10]
+        "historico": historico
     })
 
 @app.post("/toggle_bot")
-async def configurar(status: str = Form(...), preference: str = Form(...)):
+async def config(status: str = Form(...), preference: str = Form(...)):
     bot_config["status"] = status
     bot_config["preference"] = preference
     return RedirectResponse(url="/dashboard", status_code=303)

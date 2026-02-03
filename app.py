@@ -12,20 +12,23 @@ from web3 import Web3
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGURAÇÕES REAIS ---
+# --- CONFIGURAÇÕES TÉCNICAS REAIS ---
 PIN_SISTEMA = os.getenv("guardiao", "123456")
 PRIV_KEY = os.getenv("private_key")
-WALLET_ADDRESS = "0x...E43E" # Substitua pelo seu endereço completo
+# ENDEREÇO COMPLETO QUE VOCÊ ENVIOU
+WALLET_ADDRESS = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 RPC_POLYGON = "https://polygon-rpc.com"
 
-# Contrato USDC na Polygon para ler saldo real
+# Contrato USDC Oficial (Polygon)
 USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 USDC_ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
 
 w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
+# Converte para Checksum para evitar erros de leitura
+wallet_check = w3.to_checksum_address(WALLET_ADDRESS)
 usdc_instancia = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(USDC_ABI))
 
-# --- PERSISTÊNCIA ---
+# --- PERSISTÊNCIA DO HISTÓRICO ---
 FILE_HISTORICO = "historico_permanente.json"
 
 def salvar_dados(lista):
@@ -41,47 +44,48 @@ def carregar_dados():
 bot_config = {"status": "OFF", "preference": "YES"}
 historico = carregar_dados()
 
-# --- MOTOR AUTÔNOMO ---
+# --- MOTOR DE MONITORAMENTO ---
 async def loop_principal():
     global historico
     while True:
         if bot_config["status"] == "ON":
             try:
+                # Busca mercado real
                 res = requests.get("https://clob.polymarket.com/markets", timeout=10)
-                mercado = res.json()[0].get('question', 'Polymarket')[:25] if res.status_code == 200 else "Scanner"
+                mercado_nome = res.json()[0].get('question', 'Polymarket')[:25] if res.status_code == 200 else "Scanner Ativo"
                 
+                # Registra o Scanner no histórico permanente
                 novo_log = {
                     "data": datetime.now().strftime("%d/%m %H:%M"),
-                    "mercado": mercado,
+                    "mercado": mercado_nome,
                     "lado": bot_config["preference"],
-                    "resultado": "SINCRO_REAL 📡"
+                    "resultado": "SINCRO_OK 📡"
                 }
                 historico.insert(0, novo_log)
                 historico = historico[:20]
                 salvar_dados(historico)
             except: pass
-        await asyncio.sleep(300)
+        await asyncio.sleep(300) # 5 minutos
 
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(loop_principal())
 
-# --- INTERFACE COM SALDO REAL ---
+# --- INTERFACE WEB (SITE) ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
     try:
-        # Lendo POL Real
-        pol_raw = w3.eth.get_balance(w3.to_checksum_address(WALLET_ADDRESS))
+        # Busca Saldo POL Real
+        pol_raw = w3.eth.get_balance(wallet_check)
         pol_real = w3.from_wei(pol_raw, 'ether')
         
-        # Lendo USDC Real
-        usdc_raw = usdc_instancia.functions.balanceOf(w3.to_checksum_address(WALLET_ADDRESS)).call()
-        usdc_real = usdc_raw / 10**6 # USDC tem 6 decimais
+        # Busca Saldo USDC Real
+        usdc_raw = usdc_instancia.functions.balanceOf(wallet_check).call()
+        usdc_real = usdc_raw / 10**6
         
         saldos = {"pol": f"{pol_real:.2f}", "usdc": f"{usdc_real:.2f}"}
-    except Exception as e:
-        print(f"Erro saldo: {e}")
-        saldos = {"pol": "0.00", "usdc": "0.00"}
+    except:
+        saldos = {"pol": "Erro", "usdc": "Erro"}
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -102,7 +106,7 @@ async def index(request: Request): return templates.TemplateResponse("login.html
 
 @app.post("/entrar")
 async def login(pin: str = Form(...)):
-    return RedirectResponse(url="/dashboard", status_code=303) if pin == PIN_SISTEMA else "Erro"
+    return RedirectResponse(url="/dashboard", status_code=303) if pin == PIN_SISTEMA else "PIN INVÁLIDO"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

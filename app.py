@@ -10,12 +10,11 @@ templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
 app = FastAPI()
 
-# --- CONFIGURAÇÕES RENDER ---
+# --- CONFIGURAÇÕES ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 private_key = os.getenv("private_key", "").strip() 
 guardiao = os.getenv("guardiao") 
 
-# Conexão com Redundância
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 bot_config = {"status": "OFF"}
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
@@ -72,12 +71,10 @@ async def painel(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "usdc": usdc, "pol": pol, "bot": bot_config, "historico": logs})
 
 @app.post("/toggle_bot")
-async def toggle(status: str = Form(...), pin_confirm: str = Form(...)):
-    if pin_confirm == guardiao:
-        bot_config["status"] = status
-        registrar_log(f"Bot {status}", "SISTEMA")
-        return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<script>alert('PIN INCORRETO'); window.location.href='/dashboard';</script>")
+async def toggle(status: str = Form(...)):
+    bot_config["status"] = status
+    registrar_log(f"Bot {status}", "SISTEMA")
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 @app.get("/")
 async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})

@@ -1,56 +1,78 @@
 import os
+import uvicorn
+from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-import uvicorn
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+# Configurações de Segurança
 PIN_SISTEMA = os.getenv("guardiao", "123456")
 
-# Banco de dados temporário (em memória)
-dados_bot = {"status": "OFF", "preference": "YES"}
-historico = [
-    {"data": "2026-02-03", "mercado": "BTC > 100k", "lado": "YES", "valor": "2.00", "resultado": "WIN"},
-    {"data": "2026-02-02", "mercado": "POL Up", "lado": "NO", "valor": "1.50", "resultado": "LOSS"}
-]
+# Estado do Sistema (Simulando um Banco de Dados)
+estado = {
+    "bot": {"status": "OFF", "preference": "YES"},
+    "saldo": {"usdc": 14.44, "pol": 1.25, "wallet": "0x...E43E"},
+    "historico": [
+        {"data": "2026-02-03 14:20", "mercado": "BTC > 100k", "lado": "YES", "valor": "1.00", "resultado": "WIN"},
+        {"data": "2026-02-03 15:10", "mercado": "POL Volatility", "lado": "NO", "valor": "0.50", "resultado": "WAIT"}
+    ]
+}
 
-def logica_robo_decisao(mercado):
-    # Aqui entra a inteligência: ele escolhe baseado na sua preferência
-    return dados_bot["preference"]
+# --- Lógica Profissional do Bot ---
+def executar_estrategia_guardiao():
+    """
+    Simula a decisão do bot baseada na preferência do usuário 
+    e na leitura de 'confiança' do mercado.
+    """
+    if estado["bot"]["status"] == "ON":
+        # Aqui o bot decidiria o valor baseado em % da banca (Ex: 5%)
+        valor_operacao = round(estado["saldo"]["usdc"] * 0.05, 2)
+        decisao = estado["bot"]["preference"]
+        
+        # Simula o registro automático
+        nova_op = {
+            "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mercado": "Auto-Scanner Polymarket",
+            "lado": decisao,
+            "valor": str(valor_operacao),
+            "resultado": "OPEN"
+        }
+        estado["historico"].insert(0, nova_op)
+
+# --- Rotas do Servidor ---
 
 @app.get("/", response_class=HTMLResponse)
-async def login_page(request: Request):
+async def login_view(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
-async def validar_login(pin: str = Form(...)):
+async def autenticar(pin: str = Form(...)):
     if pin == PIN_SISTEMA:
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("<h1>PIN INCORRETO</h1><a href='/'>Voltar</a>")
+    return HTMLResponse("<h1>ACESSO NEGADO</h1><a href='/'>Tentar Novamente</a>")
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(request: Request):
-    mercados = [
-        {"id": "m1", "question": "Bitcoin 100k em Fev?", "slug": "btc-100k"},
-        {"id": "m2", "question": "Ethereum 5k em Mar?", "slug": "eth-5k"}
-    ]
+async def dashboard_view(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "wallet": "0x...E43E",
-        "usdc": "14.44",
-        "pol": "1.25",
-        "bot": dados_bot,
-        "markets": mercados,
-        "historico": historico
+        "wallet": estado["saldo"]["wallet"],
+        "usdc": estado["saldo"]["usdc"],
+        "pol": estado["saldo"]["pol"],
+        "bot": estado["bot"],
+        "historico": estado["historico"][:5] # Mostra os 5 últimos
     })
 
 @app.post("/toggle_bot")
-async def atualizar_setup(status: str = Form(...), preference: str = Form(...)):
-    global dados_bot
-    dados_bot["status"] = status
-    dados_bot["preference"] = preference
+async def atualizar_config(status: str = Form(...), preference: str = Form(...)):
+    estado["bot"]["status"] = status
+    estado["bot"]["preference"] = preference
+    
+    if status == "ON":
+        executar_estrategia_guardiao() # Dispara a lógica ao ligar
+        
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

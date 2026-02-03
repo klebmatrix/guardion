@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw - Terminal Mobile</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: white; margin: 0; padding-bottom: 50px; }
+        .header-img { width: 100%; height: 120px; object-fit: cover; border-bottom: 2px solid #3b82f6; }
+        .container { padding: 15px; max-width: 500px; margin: auto; }
+        .card { background: #1e293b; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #334155; }
+        .wallet-info { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+        .bot-panel { border: 2px solid #3b82f6; background: #1e293b; }
+        select, input { width: 100%; padding: 12px; margin: 8px 0; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        .btn { border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        .btn-update { background: #3b82f6; color: white; }
+        .btn-yes { background: #16a34a; color: white; flex: 1; }
+        .btn-no { background: #dc2626; color: white; flex: 1; }
+        .badge { padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; text-transform: uppercase; }
+        .status-on { background: #065f46; color: #34d399; }
+        .status-off { background: #7f1d1d; color: #f87171; }
+    </style>
+</head>
+<body>
+    <img src="https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=1200&h=140" class="header-img">
+    
+    <div class="container">
+        <div class="card wallet-info">
+            <div>
+                <small style="color:#94a3b8">Endereço:</small><br>
+                <code>{{ wallet }}</code>
+            </div>
+            <div style="text-align: right;">
+                <b style="color:#22c55e;">$ {{ usdc }}</b><br>
+                <small style="color:#fbbf24">{{ pol }} POL</small>
+            </div>
+        </div>
+
+        <div class="card bot-panel">
+            <h3 style="margin:0 0 10px 0;">🤖 Robô: 
+                <span class="badge {{ 'status-on' if bot.status == 'ON' else 'status-off' }}">
+                    {{ bot.status }}
+                </span>
+            </h3>
+            <form action="/toggle_bot" method="post">
+                <select name="status">
+                    <option value="OFF" {{ 'selected' if bot.status == 'OFF' }}>🔴 DESLIGAR AUTOMAÇÃO</option>
+                    <option value="ON" {{ 'selected' if bot.status == 'ON' }}>🟢 LIGAR AUTOMAÇÃO</option>
+                </select>
+                <select name="preference">
+                    <option value="YES" {{ 'selected' if bot.preference == 'YES' }}>COMPRAR SEMPRE "YES"</option>
+                    <option value="NO" {{ 'selected' if bot.preference == 'NO' }}>COMPRAR SEMPRE "NO"</option>
+                </select>
+                <button type="submit" class="btn btn-update">ATUALIZAR SETUP</button>
+            </form>
+        </div>
+
+        {% if aviso %}
+        <div class="card" style="background:#1e3a8a; border:none; text-align:center; font-size:0.9rem;">
+            {{ aviso }}
+        </div>
+        {% endif %}
+
+        <h4 style="margin: 20px 0 10px 0; color:#94a3b8;">MERCADOS ATIVOS</h4>
+        {% for m in markets %}
+        <div class="card">
+            <div style="margin-bottom: 12px; font-size: 0.95rem;">{{ m.question }}</div>
+            <form action="/trade" method="post">
+                <input type="hidden" name="market_id" value="{{ m.id }}">
+                <input type="number" name="amount" step="0.01" placeholder="Quantia USDC" required>
+                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                    <button type="submit" name="side" value="buy" class="btn btn-yes">YES</button>
+                    <button type="submit" name="side" value="sell" class="btn btn-no">NO</button>
+                </div>
+            </form>
+            <div style="text-align: center; margin-top: 10px;">
+                <a href="https://polymarket.com/event/{{ m.slug }}" target="_blank" style="color:#3b82f6; font-size: 0.75rem; text-decoration:none;">📈 Ver Gráfico Detalhado</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

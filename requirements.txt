@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+httpx
+web3
+python-dotenv

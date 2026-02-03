@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <img src="https://via.placeholder.com/1200x120/3b82f6/ffffff?text=OPENCLAW+HEADER" style="width:100%">
+    
+    <div style="text-align: center; margin-top: 50px;">
+        <h2>🛡️ Login Guardião</h2>
+        {% if erro %}<p style="color:red">{{ erro }}</p>{% endif %}
+        <form action="/entrar" method="post">
+            <input type="password" name="senha" placeholder="Chave Mestra" required>
+            <button type="submit">Entrar</button>
+        </form>
+    </div>
+</body>
+</html>

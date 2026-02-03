@@ -1,0 +1,24 @@
+services:
+  # ======================
+  # API
+  # ======================
+  - type: web
+    name: guardiao-api
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PRIVATE_KEY
+        sync: false
+
+  # ======================
+  # BOT WORKER
+  # ======================
+  - type: worker
+    name: guardiao-bot
+    runtime: python
+    buildCommand: pip install -r worker/requirements.txt
+    startCommand: python worker/bot.py
+    envVars:
+      - key: API_URL
+        value: https://guardiao-api.onrender.com

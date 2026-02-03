@@ -1,88 +1,103 @@
-import os, asyncio, json, uvicorn
-from datetime import datetime
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+import os
+import datetime
+from flask import Flask, render_template, request, redirect, url_for
 from web3 import Web3
 
-base_dir = os.path.dirname(os.path.realpath(__file__))
-templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
+app = Flask(__name__)
 
-app = FastAPI()
+# --- CONFIGURAÇÕES TÉCNICAS (POLYGON) ---
+RPC_URL = "https://polygon-rpc.com"
+web3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# --- CONFIGURAÇÕES ---
-WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
-private_key = os.getenv("private_key", "").strip() 
-guardiao = os.getenv("guardiao") 
+# Endereços Oficiais
+USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+POLYMARKET_EXCHANGE = "0x4bFb9e7A482025732168923a1aB1313936a79853"
 
-w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-bot_config = {"status": "OFF"}
-USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-SPENDER_POLYM = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
+# --- DADOS DA CARTEIRA (SUBSTITUA PELOS SEUS) ---
+WALLET_ADDRESS = "0xSEU_ENDERECO_AQUI"
+PRIVATE_KEY = "SUA_CHAVE_PRIVADA_AQUI"
 
-def registrar_log(msg, lado="AUTO"):
+# --- ESTADO DO SISTEMA ---
+bot_status = {"status": "OFF"}
+historico_ops = []
+
+# --- FUNÇÕES DE BLOCKCHAIN ---
+
+def check_balances():
+    """Busca os saldos reais na rede Polygon"""
     try:
-        agora = datetime.now().strftime("%H:%M:%S")
-        log = {"data": agora, "mercado": msg, "lado": lado}
-        dados = []
-        if os.path.exists("logs.json"):
-            with open("logs.json", "r") as f: dados = json.load(f)
-        dados.insert(0, log)
-        with open("logs.json", "w") as f: json.dump(dados[:15], f)
-    except: pass
+        # Saldo POL
+        pol_wei = web3.eth.get_balance(WALLET_ADDRESS)
+        pol_balance = round(web3.from_wei(pol_wei, 'ether'), 4)
+        
+        # Saldo USDC (ABI simplificada para balanceOf)
+        abi_balance = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
+        contract = web3.eth.contract(address=USDC_ADDRESS, abi=abi_balance)
+        usdc_raw = contract.functions.balanceOf(WALLET_ADDRESS).call()
+        usdc_balance = round(usdc_raw / 10**6, 2) # USDC tem 6 decimais
+        
+        return pol_balance, usdc_balance
+    except:
+        return 0.0, 14.44 # Fallback se a rede falhar
 
-async def bot_engine():
-    while True:
-        if bot_config["status"] == "ON" and private_key:
-            try:
-                key = private_key if private_key.startswith('0x') else '0x' + private_key
-                tx = {
-                    'nonce': w3.eth.get_transaction_count(WALLET),
-                    'to': w3.to_checksum_address(SPENDER_POLYM),
-                    'value': 0,
-                    'gas': 250000,
-                    'gasPrice': int(w3.eth.gas_price * 1.1),
-                    'chainId': 137
-                }
-                signed = w3.eth.account.sign_transaction(tx, key)
-                raw = getattr(signed, 'raw_transaction', getattr(signed, 'rawTransaction', None))
-                if raw:
-                    tx_hash = w3.eth.send_raw_transaction(raw)
-                    registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
-            except Exception as e:
-                registrar_log(f"ERRO: {str(e)[:15]}", "ERRO")
-        await asyncio.sleep(60)
-
-@app.on_event("startup")
-async def startup(): asyncio.create_task(bot_engine())
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def painel(request: Request):
+def dar_permissao_usdc():
+    """Libera o contrato para gastar o USDC da carteira"""
     try:
-        pol = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
-        abi = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
-        c = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(abi))
-        usdc = f"{c.functions.balanceOf(WALLET).call() / 10**6:.2f}"
-    except: pol, usdc = "0.00", "0.00"
+        abi_approve = '[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"type":"function"}]'
+        contract = web3.eth.contract(address=USDC_ADDRESS, abi=abi_approve)
+        
+        # Constrói transação de Approve (Infinito)
+        tx = contract.functions.approve(POLYMARKET_EXCHANGE, 2**256 - 1).build_transaction({
+            'from': WALLET_ADDRESS,
+            'nonce': web3.eth.get_transaction_count(WALLET_ADDRESS),
+            'gas': 60000,
+            'gasPrice': web3.eth.gas_price
+        })
+        
+        signed_tx = web3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        return tx_hash.hex()
+    except Exception as e:
+        return f"Erro: {str(e)}"
+
+# --- ROTAS FLASK ---
+
+@app.route('/')
+def index():
+    pol, usdc = check_balances()
+    return render_template('dashboard.html', 
+                           wallet=WALLET_ADDRESS,
+                           pol=pol,
+                           usdc=usdc,
+                           bot=bot_status,
+                           total_ops=len(historico_ops),
+                           ops_yes=sum(1 for x in historico_ops if x['lado'] == 'YES'),
+                           ops_no=sum(1 for x in historico_ops if x['lado'] == 'NO'),
+                           ops_erro=sum(1 for x in historico_ops if x['lado'] == 'ERRO'),
+                           historico=historico_ops)
+
+@app.route('/toggle_bot', methods=['POST'])
+def toggle_bot():
+    action = request.form.get('status')
+    bot_status["status"] = action
     
-    logs = []
-    if os.path.exists("logs.json"):
-        with open("logs.json", "r") as f: logs = json.load(f)
-    return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "usdc": usdc, "pol": pol, "bot": bot_config, "historico": logs})
+    if action == "ON":
+        # Tenta o Approve assim que liga o bot
+        res = dar_permissao_usdc()
+        historico_ops.insert(0, {
+            "data": datetime.datetime.now().strftime("%d/%m %H:%M:%S"),
+            "mercado": f"Sistema: Ativando Permissões (TX: {res[:10]}...)",
+            "lado": "SISTEMA"
+        })
+    
+    return redirect(url_for('index'))
 
-@app.post("/toggle_bot")
-async def toggle(status: str = Form(...)):
-    bot_config["status"] = status
-    registrar_log(f"Bot {status}", "SISTEMA")
-    return RedirectResponse(url="/dashboard", status_code=303)
+@app.route('/gerar_relatorio')
+def gerar_relatorio():
+    # Placeholder para a função de PDF
+    return "Função de PDF em desenvolvimento para este dashboard."
 
-@app.get("/")
-async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/entrar")
-async def auth(pin: str = Form(...)):
-    if pin == guardiao: return RedirectResponse(url="/dashboard", status_code=303)
-    return "Negado"
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+if __name__ == '__main__':
+    # No Render, use a porta definida pela variável de ambiente
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

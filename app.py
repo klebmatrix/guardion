@@ -15,10 +15,21 @@ WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 private_key = os.getenv("private_key", "").strip() 
 guardiao = os.getenv("guardiao") 
 
-# Usando um RPC alternativo para evitar delay de atualização
-w3 = Web3(Web3.HTTPProvider("https://polygon.llamarpc.com"))
-bot_config = {"status": "OFF"}
+# LISTA DE NODES (Se um cair, o robô usa o outro)
+RPC_LINKS = [
+    "https://polygon-rpc.com",
+    "https://polygon.llamarpc.com",
+    "https://rpc-mainnet.maticvigil.com"
+]
 
+def conectar_w3():
+    for link in RPC_LINKS:
+        w3 = Web3(Web3.HTTPProvider(link, request_kwargs={'timeout': 20}))
+        if w3.is_connected(): return w3
+    return None
+
+w3 = conectar_w3()
+bot_config = {"status": "OFF"}
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 SPENDER_POLYM = "0x4bFb9B0488439c049405493f6314A7097C223E1a"
 
@@ -34,16 +45,19 @@ def registrar_log(msg, lado="AUTO"):
     except: pass
 
 async def bot_engine():
+    global w3
     while True:
         if bot_config["status"] == "ON" and private_key:
             try:
+                if not w3 or not w3.is_connected(): w3 = conectar_w3()
+                
                 key = private_key if private_key.startswith('0x') else '0x' + private_key
                 tx = {
                     'nonce': w3.eth.get_transaction_count(WALLET),
                     'to': w3.to_checksum_address(SPENDER_POLYM),
                     'value': 0,
                     'gas': 250000,
-                    'gasPrice': w3.eth.gas_price,
+                    'gasPrice': int(w3.eth.gas_price * 1.2), # Aumenta 20% para não travar
                     'chainId': 137
                 }
                 signed = w3.eth.account.sign_transaction(tx, key)
@@ -52,38 +66,28 @@ async def bot_engine():
                     tx_hash = w3.eth.send_raw_transaction(raw)
                     registrar_log(f"TIRO REAL: {tx_hash.hex()[:10]}", "YES")
             except Exception as e:
-                registrar_log(f"ERRO: {str(e)[:15]}", "ERRO")
+                registrar_log(f"ERRO REDE: {str(e)[:15]}", "ERRO")
         await asyncio.sleep(60)
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(bot_engine())
 
-# --- ROTA DO DASHBOARD COM CONSULTA REAL ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def painel(request: Request):
-    # Força a busca do saldo POL e USDC na blockchain AGORA
+    global w3
+    pol_real, usdc_real = "Erro", "Erro"
     try:
-        pol_raw = w3.eth.get_balance(WALLET)
-        pol_real = f"{w3.from_wei(pol_raw, 'ether'):.2f}"
-        
-        abi_minima = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
-        contrato = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(abi_minima))
-        usdc_real = f"{contrato.functions.balanceOf(WALLET).call() / 10**6:.2f}"
-    except:
-        pol_real, usdc_real = "Erro", "Erro"
-
+        if not w3 or not w3.is_connected(): w3 = conectar_w3()
+        pol_real = f"{w3.from_wei(w3.eth.get_balance(WALLET), 'ether'):.2f}"
+        abi = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
+        c = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(abi))
+        usdc_real = f"{c.functions.balanceOf(WALLET).call() / 10**6:.2f}"
+    except: pass
+    
     logs = []
     if os.path.exists("logs.json"):
         with open("logs.json", "r") as f: logs = json.load(f)
-
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "wallet": WALLET, 
-        "usdc": usdc_real, "pol": pol_real, # Aqui entram os valores reais capturados acima
-        "bot": bot_config, "historico": logs, "total_ops": len(logs),
-        "ops_yes": sum(1 for l in logs if l['lado'] == 'YES'),
-        "ops_no": sum(1 for l in logs if l['lado'] == 'NO'),
-        "ops_erro": sum(1 for l in logs if l['lado'] == 'ERRO')
-    })
+    return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "usdc": usdc_real, "pol": pol_real, "bot": bot_config, "historico": logs})
 
 @app.get("/")
 async def home(request: Request): return templates.TemplateResponse("login.html", {"request": request})

@@ -12,6 +12,9 @@ templates = Jinja2Templates(directory="templates")
 # --- CONFIGURAÇÕES ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 PRIV_KEY = os.getenv("private_key")
+# Defina aqui um PIN reserva caso a variável do Render falhe
+PIN_RESERVA = "202626" 
+
 RPC_POLYGON = "https://polygon-rpc.com"
 USDC_NATIVO = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 CTF_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
@@ -33,16 +36,19 @@ def registrar_log(mensagem, lado="SCAN", resultado="OK"):
         with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
+# --- MOTOR 5 MINUTOS ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON" and PRIV_KEY:
-            registrar_log("Varredura 5m", "SISTEMA", "ATIVO")
-            # Aqui vai a lógica de busca...
+            registrar_log("Varredura Ativa (5m)", "MOTOR", "SCAN")
+            # Lógica de análise aqui...
         await asyncio.sleep(300)
 
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(sniper_loop())
+
+# --- ROTAS DE ACESSO ---
 
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -50,9 +56,21 @@ async def login_page(request: Request):
 
 @app.post("/entrar")
 async def validar_login(pin: str = Form(...)):
-    if pin == os.getenv("guardiao", "123456"):
+    # Tenta pegar do Render, se não existir, usa o Reserva
+    pin_correto = os.getenv("guardiao", PIN_RESERVA)
+    
+    # Limpa espaços em branco acidentais
+    if pin.strip() == str(pin_correto).strip():
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("PIN INCORRETO")
+    else:
+        return HTMLResponse(f"""
+            <div style='background:#111;color:red;padding:20px;text-align:center;font-family:sans-serif;'>
+                <h2>⚠️ PIN INCORRETO</h2>
+                <p>O sistema não aceitou o código digitado.</p>
+                <p>Dica: Verifique se a variável 'guardiao' no Render está correta.</p>
+                <a href='/' style='color:white'>Tentar Novamente</a>
+            </div>
+        """)
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -60,7 +78,7 @@ async def dashboard(request: Request):
         pol = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
         c = w3.eth.contract(address=w3.to_checksum_address(USDC_NATIVO), abi=json.loads(ABI_USDC))
         usdc = round(c.functions.balanceOf(WALLET).call() / 1e6, 2)
-    except: pol, usdc = 0, 0
+    except: pol, usdc = "Erro", "Erro"
     
     logs = []
     if os.path.exists("logs.json"):
@@ -74,4 +92,5 @@ async def dashboard(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
+    registrar_log(f"Bot alterado para {status}", "SISTEMA", "OK")
     return RedirectResponse(url="/dashboard", status_code=303)

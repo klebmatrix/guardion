@@ -4,7 +4,11 @@ from flask import Flask, render_template, request, redirect, url_for, session
 from web3 import Web3
 from functools import wraps
 
-app = Flask(__name__)
+# FORÇANDO O CAMINHO DA PASTA TEMPLATES
+base_dir = os.path.abspath(os.path.dirname(__file__))
+template_dir = os.path.join(base_dir, 'templates')
+
+app = Flask(__name__, template_folder=template_dir)
 app.secret_key = os.environ.get("FLASK_SECRET", "sniper_ultra_2026")
 
 # --- CONFIGURAÇÕES RENDER ---
@@ -32,6 +36,7 @@ def login_required(f):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        # Aqui ele confere o 'guardiao' do Render
         if request.form.get('pin') == PIN_SISTEMA:
             session['logged_in'] = True
             return redirect(url_for('index'))
@@ -45,6 +50,7 @@ def index():
     except:
         pol_bal = "0.0"
     
+    # Renderiza o HTML que você já colocou na pasta templates
     return render_template('dashboard.html', 
                          wallet=CARTEIRA_ALVO, 
                          pol=pol_bal, 
@@ -62,11 +68,10 @@ def toggle_bot():
     status_acao = request.form.get("status")
     bot_data["status"] = status_acao
     
-    # Log de sistema
     historico_ops.insert(0, {
         "data": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "mercado": "Controle Manual",
-        "lado": "SISTEMA" if status_acao == "ON" else "ERRO"
+        "mercado": "Ajuste de Sistema",
+        "lado": "SISTEMA" if status_acao == "ON" else "OFF"
     })
     return redirect(url_for('index'))
 

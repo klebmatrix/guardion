@@ -2,6 +2,6 @@ fastapi
 uvicorn
 web3
 requests
-fpdf
 jinja2
 python-multipart
+httpx

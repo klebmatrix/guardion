@@ -1,6 +1,7 @@
-flask
+fastapi
+uvicorn
 web3
-fpdf2
 requests
-python-dotenv
-gunicorn
+fpdf
+jinja2
+python-multipart

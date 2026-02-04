@@ -1,5 +1,6 @@
 flask
 web3
+fpdf2
+requests
 python-dotenv
 gunicorn
-fpdf2

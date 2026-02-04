@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sniper Bot - Login</title>
+    <title>⚡ Sniper Bot - Login</title>
     <style>
         * {
             margin: 0;
@@ -13,129 +13,184 @@
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             color: #fff;
+            overflow: hidden;
+        }
+
+        /* Efeito de brilho de fundo */
+        body::before {
+            content: "";
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: #00ff88;
+            filter: blur(150px);
+            opacity: 0.1;
+            z-index: 0;
         }
         
         .login-container {
-            background: rgba(0, 255, 136, 0.05);
-            border: 2px solid #00ff88;
-            border-radius: 15px;
+            position: relative;
+            background: rgba(16, 20, 30, 0.8);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 12px;
             padding: 40px;
             max-width: 400px;
-            width: 100%;
-            box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+            width: 90%;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 136, 0.1);
+            z-index: 1;
+        }
+
+        /* Linha decorativa no topo */
+        .login-container::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00ff88, transparent);
         }
         
-        .login-container h1 {
+        h1 {
             text-align: center;
             color: #00ff88;
             margin-bottom: 10px;
-            font-size: 28px;
+            font-size: 26px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
             text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
         }
         
-        .login-container p {
+        .subtitle {
             text-align: center;
-            color: #aaa;
+            color: #888;
             margin-bottom: 30px;
-            font-size: 14px;
+            font-size: 13px;
+        }
+
+        .error-msg {
+            background: rgba(255, 68, 68, 0.1);
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            text-align: center;
+            animation: shake 0.3s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 25px;
         }
         
         .form-group label {
             display: block;
             margin-bottom: 8px;
             color: #00ff88;
-            font-weight: bold;
-            font-size: 14px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         
         .form-group input {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #00ff88;
-            border-radius: 6px;
-            background: rgba(0, 255, 136, 0.1);
+            padding: 14px;
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.3);
             color: #fff;
             font-size: 16px;
+            text-align: center;
+            letter-spacing: 4px;
             transition: all 0.3s ease;
         }
         
         .form-group input:focus {
             outline: none;
-            border-color: #00dd77;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-            background: rgba(0, 255, 136, 0.15);
-        }
-        
-        .form-group input::placeholder {
-            color: rgba(0, 255, 136, 0.5);
+            border-color: #00ff88;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
+            background: rgba(0, 255, 136, 0.05);
         }
         
         .btn-login {
             width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #00ff88 0%, #00dd77 100%);
-            color: #000;
+            padding: 14px;
+            background: #00ff88;
+            color: #0b0e14;
             border: none;
-            border-radius: 6px;
+            border-radius: 4px;
             font-weight: bold;
-            font-size: 16px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
             cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
         }
         
         .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+            background: #00cc6e;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+            transform: translateY(-1px);
         }
-        
+
         .btn-login:active {
             transform: translateY(0);
         }
         
-        .info-text {
+        .footer-note {
             text-align: center;
-            color: #00ff88;
-            font-size: 12px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(0, 255, 136, 0.2);
+            color: #555;
+            font-size: 11px;
+            margin-top: 25px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-top: 15px;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <h1>⚡ Sniper Bot</h1>
-        <p>Acesso ao Painel de Controle</p>
+        <h1>⚡ SNIPER BOT</h1>
+        <p class="subtitle">AUTENTICAÇÃO DE SISTEMA</p>
+        
+        {% if error %}
+        <div class="error-msg">
+            ⚠️ {{ error }}
+        </div>
+        {% endif %}
         
         <form method="post" action="/login">
             <div class="form-group">
-                <label for="pin">PIN de Acesso:</label>
+                <label for="pin">PIN de Segurança</label>
                 <input 
                     type="password" 
                     id="pin" 
                     name="pin" 
-                    placeholder="Digite seu PIN" 
+                    placeholder="••••••" 
                     required
                     autofocus
                 >
             </div>
             
-            <button type="submit" class="btn-login">🔓 Entrar</button>
+            <button type="submit" class="btn-login">ACESSAR TERMINAL</button>
         </form>
         
-        <div class="info-text">
-            🔒 Seu acesso é protegido por PIN criptografado
+        <div class="footer-note">
+            SISTEMA DE MONITORAMENTO POLYGON v2.0
         </div>
     </div>
 </body>

@@ -1,4 +1,4 @@
-import os, asyncio, json, requests, uvicorn
+import os, asyncio, json, uvicorn, httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -32,37 +32,41 @@ def registrar_log(mensagem, lado="SCAN", resultado="OK"):
         with open("logs.json", "w") as f: json.dump(dados[:12], f)
     except: pass
 
-# --- MOTOR COM CABEÇALHOS REAIS E INTERVALO SEGURO ---
+# --- MOTOR ASSÍNCRONO COM HTTPX ---
 async def sniper_loop():
-    # Simulando um navegador real para evitar bloqueio
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+        "Accept": "application/json"
     }
     
-    while True:
-        if bot_config["status"] == "ON":
-            try:
-                # Mudamos para o endpoint global de mercados ativos
-                url = "https://clob.polymarket.com/markets"
-                res = requests.get(url, headers=headers, timeout=10)
-                
-                if res.status_code == 200:
-                    mercados = res.json()
-                    # Procura mercados de Bitcoin ou Crypto
-                    alvos = [m for m in mercados if any(x in str(m.get('question','')).upper() for x in ["BITCOIN", "BTC", "CRYPTO"])]
+    async with httpx.AsyncClient(headers=headers, timeout=15.0, follow_redirects=True) as client:
+        while True:
+            if bot_config["status"] == "ON":
+                try:
+                    # Usando o Gamma API (mais estável para varredura rápida)
+                    url = "https://gamma-api.polymarket.com/events?active=true&limit=10"
+                    res = await client.get(url)
                     
-                    if alvos:
-                        nome = alvos[0]['question'][:25]
-                        registrar_log(f"Alvo: {nome}", "AUTO", "SUCESSO 🎯")
+                    if res.status_code == 200:
+                        mercados = res.json()
+                        # Filtro inteligente
+                        alvos = [m for m in mercados if any(x in str(m.get('title','')).upper() for x in ["BITCOIN", "BTC", "CRYPTO", "FED"])]
+                        
+                        if alvos:
+                            nome = alvos[0]['title'][:25]
+                            registrar_log(f"Alvo: {nome}", "AUTO", "LOCALIZADO 🎯")
+                        else:
+                            registrar_log("Varredura Ativa (Sem Alvos)", "SCAN", "LIMPO")
+                    elif res.status_code == 429:
+                        registrar_log("Rate Limit (Aguardando)", "AVISO", "SLOW")
+                        await asyncio.sleep(60) # Pausa de 1 min se for limitado
                     else:
-                        registrar_log("Varredura Limpa", "SCAN", "OK")
-                else:
-                    registrar_log(f"Erro API {res.status_code}", "API", "BLOQUEIO")
-            except Exception as e:
-                registrar_log("Erro de Conexão", "REDE", "RETRY")
-        
-        # AJUSTE: 20 segundos é o mínimo para não ser banido no Render Free
-        await asyncio.sleep(20) 
+                        registrar_log(f"Erro HTTP {res.status_code}", "API", "FALHA")
+                except Exception as e:
+                    registrar_log("Falha de Rota", "REDE", "RETRY")
+            
+            # 30 segundos é o ideal para o Render não derrubar sua conexão
+            await asyncio.sleep(30)
 
 @app.on_event("startup")
 async def startup_event():
@@ -96,7 +100,7 @@ async def dashboard(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Motor {status}", "SISTEMA", "STATUS")
+    registrar_log(f"Bot em {status}", "SISTEMA", "MODO")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from web3 import Web3
 from functools import wraps
 from fpdf import FPDF
 from io import BytesIO
-from dotenv import load_dotenv
+from datetime import datetime
 
 # FORÇANDO O CAMINHO DA PASTA TEMPLATES
 base_dir = os.path.abspath(os.path.dirname(__file__))

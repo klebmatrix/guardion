@@ -1,60 +1,77 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Sniper Pro</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <style>
-        body { background-color: #0a0a0a; color: #f0f0f0; }
-        .card-stats { background: #161616; border: 1px solid #333; border-radius: 15px; padding: 20px; }
-        .status-on { color: #28a745; font-weight: bold; }
-        .status-off { color: #dc3545; font-weight: bold; }
-        .table-dark { --bs-table-bg: #161616; }
-    </style>
-</head>
-<body>
-    <div class="container py-5">
-        <div class="d-flex justify-content-between align-items-center mb-5">
-            <div>
-                <h1 class="fw-bold m-0 text-primary">🎯 Sniper Mix</h1>
-                <p class="text-muted small">ID: {{ wallet[:6] }}...{{ wallet[-4:] }}</p>
-            </div>
-            <form action="/toggle_bot" method="post">
-                {% if bot.status == 'OFF' %}
-                    <input type="hidden" name="status" value="ON">
-                    <button type="submit" class="btn btn-success px-4 fw-bold shadow">ATIVAR</button>
-                {% else %}
-                    <input type="hidden" name="status" value="OFF">
-                    <button type="submit" class="btn btn-danger px-4 fw-bold shadow">PARAR</button>
-                {% endif %}
-            </form>
-        </div>
+import os, asyncio, json, requests, uvicorn
+from datetime import datetime
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware
 
-        <div class="row g-4 mb-5 text-center">
-            <div class="col-md-4"><div class="card-stats">Saldo POL<h2 class="text-info">{{ pol }}</h2></div></div>
-            <div class="col-md-4"><div class="card-stats">Banca USDC<h2 class="text-primary">{{ usdc }}</h2></div></div>
-            <div class="col-md-4"><div class="card-stats">Motor<h2 class="{{ 'status-on' if bot.status == 'ON' else 'status-off' }}">{{ bot.status }}</h2></div></div>
-        </div>
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
-        <div class="card-stats">
-            <h5 class="mb-4">📜 Logs (Ciclo 5 min)</h5>
-            <div class="table-responsive">
-                <table class="table table-dark table-hover border-secondary">
-                    <thead><tr><th>Hora</th><th>Mercado</th><th>Ação</th><th>Resultado</th></tr></thead>
-                    <tbody>
-                        {% for item in historico %}
-                        <tr>
-                            <td>{{ item.data }}</td>
-                            <td>{{ item.mercado }}</td>
-                            <td class="text-uppercase">{{ item.lado }}</td>
-                            <td><span class="badge bg-primary">{{ item.resultado }}</span></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
+# --- CONFIGURAÇÕES ---
+WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
+PRIV_KEY = os.getenv("private_key")
+RPC_POLYGON = "https://polygon-rpc.com"
+USDC_NATIVO = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+CTF_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
+
+w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
+w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
+bot_config = {"status": "OFF"}
+ABI_USDC = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"remaining","type":"uint256"}],"type":"function"}]'
+
+def registrar_log(mensagem, lado="SCAN", resultado="OK"):
+    try:
+        agora = datetime.now().strftime("%H:%M:%S")
+        log = {"data": agora, "mercado": mensagem, "lado": lado, "resultado": resultado}
+        dados = []
+        if os.path.exists("logs.json"):
+            with open("logs.json", "r") as f: dados = json.load(f)
+        dados.insert(0, log)
+        with open("logs.json", "w") as f: json.dump(dados[:15], f)
+    except: pass
+
+async def sniper_loop():
+    while True:
+        if bot_config["status"] == "ON" and PRIV_KEY:
+            registrar_log("Varredura 5m", "SISTEMA", "ATIVO")
+            # Aqui vai a lógica de busca...
+        await asyncio.sleep(300)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(sniper_loop())
+
+@app.get("/", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/entrar")
+async def validar_login(pin: str = Form(...)):
+    if pin == os.getenv("guardiao", "123456"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+    return HTMLResponse("PIN INCORRETO")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    try:
+        pol = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
+        c = w3.eth.contract(address=w3.to_checksum_address(USDC_NATIVO), abi=json.loads(ABI_USDC))
+        usdc = round(c.functions.balanceOf(WALLET).call() / 1e6, 2)
+    except: pol, usdc = 0, 0
+    
+    logs = []
+    if os.path.exists("logs.json"):
+        with open("logs.json", "r") as f: logs = json.load(f)
+        
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request, "wallet": WALLET, "pol": pol, "usdc": usdc,
+        "bot": bot_config, "historico": logs
+    })
+
+@app.post("/toggle_bot")
+async def toggle(status: str = Form(...)):
+    bot_config["status"] = status
+    return RedirectResponse(url="/dashboard", status_code=303)

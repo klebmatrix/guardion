@@ -9,7 +9,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGS ---
 WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
 PRIV_KEY = os.getenv("private_key")
 RPC_POLYGON = "https://polygon-rpc.com"
@@ -32,32 +32,37 @@ def registrar_log(mensagem, lado="SCAN", resultado="OK"):
         with open("logs.json", "w") as f: json.dump(dados[:12], f)
     except: pass
 
-# --- MOTOR SNIPER 5s COM PROTEÇÃO ---
+# --- MOTOR COM CABEÇALHOS REAIS E INTERVALO SEGURO ---
 async def sniper_loop():
+    # Simulando um navegador real para evitar bloqueio
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
     while True:
         if bot_config["status"] == "ON":
             try:
-                # Busca rápida com timeout curto para não travar o app
-                res = requests.get("https://clob.polymarket.com/markets", timeout=5)
+                # Mudamos para o endpoint global de mercados ativos
+                url = "https://clob.polymarket.com/markets"
+                res = requests.get(url, headers=headers, timeout=10)
                 
                 if res.status_code == 200:
                     mercados = res.json()
-                    # Filtro de palavras-chave para Bitcoin/Crypto
-                    alvos = [m for m in mercados if any(x in m.get('question','') for x in ["Bitcoin", "BTC", "Crypto"])]
+                    # Procura mercados de Bitcoin ou Crypto
+                    alvos = [m for m in mercados if any(x in str(m.get('question','')).upper() for x in ["BITCOIN", "BTC", "CRYPTO"])]
                     
                     if alvos:
-                        registrar_log(f"Alvo: {alvos[0]['question'][:25]}", "SNIPER", "狙击 🎯")
+                        nome = alvos[0]['question'][:25]
+                        registrar_log(f"Alvo: {nome}", "AUTO", "SUCESSO 🎯")
                     else:
-                        registrar_log("Varredura em 5s...", "FAST", "BUSCANDO")
-                elif res.status_code == 429: # Erro de excesso de requisições
-                    registrar_log("API Sobrecarga", "ALERTA", "PAUSA 30s")
-                    await asyncio.sleep(30) # Pausa maior se for bloqueado
+                        registrar_log("Varredura Limpa", "SCAN", "OK")
                 else:
-                    registrar_log(f"Erro {res.status_code}", "API", "RETRY")
+                    registrar_log(f"Erro API {res.status_code}", "API", "BLOQUEIO")
             except Exception as e:
-                registrar_log("Falha Conexão", "REDES", "RETRY")
+                registrar_log("Erro de Conexão", "REDE", "RETRY")
         
-        await asyncio.sleep(5) 
+        # AJUSTE: 20 segundos é o mínimo para não ser banido no Render Free
+        await asyncio.sleep(20) 
 
 @app.on_event("startup")
 async def startup_event():
@@ -81,7 +86,7 @@ async def dashboard(request: Request):
         pol = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
         c = w3.eth.contract(address=w3.to_checksum_address(USDC_NATIVO), abi=json.loads(ABI_USDC))
         usdc = round(c.functions.balanceOf(WALLET).call() / 1e6, 2)
-    except: pol, usdc = "Erro", "Erro"
+    except: pol, usdc = 0, 0
     
     logs = []
     if os.path.exists("logs.json"):
@@ -91,7 +96,7 @@ async def dashboard(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Motor {status}", "SISTEMA", "⚡")
+    registrar_log(f"Motor {status}", "SISTEMA", "STATUS")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

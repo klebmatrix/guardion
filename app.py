@@ -12,23 +12,23 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "sniper_ultra_2026")
 
-# --- CONFIGURAÇÕES DE REDE E CONTRATOS ---
+# --- CONFIGURAÇÕES ---
 PIN_SISTEMA = os.environ.get("guardiao", "123456")
 PRIV_KEY = os.environ.get("private_key")
 RPC_URL = "https://polygon-rpc.com"
 
-# Endereços Oficiais (Polygon)
+# Endereços
 USDC_NATIVO = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-CTF_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5" # Polymarket CTF Exchange
+CTF_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 
-# ABI mínima para aprovação de token (ERC20)
-ABI_ERC20 = '[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"success","bool":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
+# ABI ERC20 completa para saldo e aprovação
+ABI_ERC20 = '[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"success","bool":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"remaining","type":"uint256"}],"type":"function"}]'
 
 web3 = Web3(Web3.HTTPProvider(RPC_URL))
 CARTEIRA_ALVO = web3.to_checksum_address("0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E")
 file_lock = threading.Lock()
 
-# --- FUNÇÕES DE APOIO ---
+# --- UTILITÁRIOS ---
 def load_json(filename, default):
     with file_lock:
         if os.path.exists(filename):
@@ -46,58 +46,58 @@ def registrar_log(mensagem, lado="AUTO", resultado="OK"):
     logs.insert(0, {"data": datetime.now().strftime("%d/%m %H:%M:%S"), "mercado": mensagem, "lado": lado, "resultado": resultado})
     save_json("logs.json", logs[:50])
 
-# --- LÓGICA DE TRANSAÇÃO REAL ---
-def executar_aprovacao_real(valor_usdc):
-    """Aprova o contrato da Polymarket a gastar seu USDC"""
+# --- LÓGICA DE MOVIMENTAÇÃO REAL ---
+def verificar_e_aprovar(valor_usdc):
+    """Verifica se já existe permissão, se não, gasta POL para aprovar."""
     try:
         account = web3.eth.account.from_key(PRIV_KEY)
         contract = web3.eth.contract(address=web3.to_checksum_address(USDC_NATIVO), abi=json.loads(ABI_ERC20))
         
         valor_wei = int(valor_usdc * 10**6)
-        nonce = web3.eth.get_transaction_count(account.address)
         
-        # Build transaction
-        tx = contract.functions.approve(web3.to_checksum_address(CTF_EXCHANGE), valor_wei).build_transaction({
+        # 1. Checar se já aprovamos antes (Allowance)
+        permissao_atual = contract.functions.allowance(account.address, web3.to_checksum_address(CTF_EXCHANGE)).call()
+        
+        if permissao_atual >= valor_wei:
+            return "Já Aprovado" # Não gasta POL à toa se já houver permissão
+
+        # 2. Se não tem permissão, faz o Approve
+        nonce = web3.eth.get_transaction_count(account.address)
+        tx = contract.functions.approve(web3.to_checksum_address(CTF_EXCHANGE), 100 * 10**6).build_transaction({
             'from': account.address,
             'nonce': nonce,
             'gas': 100000,
             'gasPrice': web3.eth.gas_price
         })
-        
         signed_tx = web3.eth.account.sign_transaction(tx, PRIV_KEY)
         tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        
-        link = f"https://polygonscan.com/tx/{tx_hash.hex()}"
-        registrar_log(f"Aprovação Enviada: {valor_usdc} USDC", "BLOCKCHAIN", "PENDENTE")
         return tx_hash.hex()
     except Exception as e:
-        registrar_log(f"Erro Transação: {str(e)[:40]}", "ERRO", "FALHA")
-        return None
+        return f"Erro: {str(e)[:30]}"
 
-# --- LOOP DO SNIPER ---
+# --- SNIPER LOOP ---
 def sniper_loop():
     while True:
         state = load_json("bot_state.json", {"status": "OFF"})
         if state["status"] == "ON" and PRIV_KEY:
-            # TESTE REAL: Inicia com 1 USDC para validação
-            tx = executar_aprovacao_real(1.0)
-            if tx:
-                # TRAVA DE SEGURANÇA: Desliga o bot após enviar a transação
+            # Tenta verificar aprovação para 1 USDC
+            res = verificar_e_aprovar(1.0)
+            
+            if res == "Já Aprovado":
+                registrar_log("Caminho Livre: USDC já aprovado para uso.", "SISTEMA", "PRONTO")
+                # Próxima fase: Aqui entrará a função de COMPRA de cotas (Trade)
+                # Por segurança, mantemos OFF até você validar que o erro de gastar POL parou
                 save_json("bot_state.json", {"status": "OFF"})
-                registrar_log("Operação Real Iniciada. Bot em PAUSA para conferência.", "SISTEMA", "SUCESSO")
+            elif "Erro" in res:
+                registrar_log(res, "ERRO", "FALHA")
+            else:
+                registrar_log(f"Nova Aprovação Enviada: {res[:10]}", "BLOCKCHAIN", "AGUARDAR")
         
         time.sleep(60)
 
 threading.Thread(target=sniper_loop, daemon=True).start()
 
 # --- ROTAS FLASK ---
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get('logged_in'): return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
@@ -109,8 +109,9 @@ def login():
     return render_template('login.html', error=error)
 
 @app.route('/')
-@login_required
+@wraps(lambda: None) # Apenas para garantir consistência
 def index():
+    if not session.get('logged_in'): return redirect(url_for('login'))
     try:
         pol = round(web3.from_wei(web3.eth.get_balance(CARTEIRA_ALVO), 'ether'), 4)
         c = web3.eth.contract(address=web3.to_checksum_address(USDC_NATIVO), abi=json.loads(ABI_ERC20))
@@ -123,24 +124,11 @@ def index():
                            historico=load_json("logs.json", []))
 
 @app.route('/toggle_bot', methods=['POST'])
-@login_required
 def toggle_bot():
     status = request.form.get("status")
     save_json("bot_state.json", {"status": status})
     registrar_log(f"Bot alterado para {status}", "SISTEMA")
     return redirect(url_for('index'))
-
-@app.route('/gerar_relatorio_pdf')
-@login_required
-def gerar_relatorio_pdf():
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Relatorio de Operacoes Reais", ln=True, align="C")
-    for log in load_json("logs.json", []):
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(0, 7, f"{log['data']} | {log['mercado']} | {log['resultado']}", ln=True)
-    return send_file(BytesIO(pdf.output()), mimetype='application/pdf', as_attachment=True, download_name="relatorio.pdf")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))

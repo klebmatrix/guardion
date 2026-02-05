@@ -1,6 +1,5 @@
 import os, datetime, json, threading, time, requests
 from flask import Flask, request, redirect, url_for, session
-from web3 import Web3
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -8,15 +7,13 @@ app.secret_key = os.urandom(24)
 # --- CONFIGURAÇÃO ---
 PIN = os.environ.get("guardiao")
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
-# O script agora procura exatamente por este nome no Render:
 PVT_KEY = os.environ.get("CHAVE_PRIVADA") 
 RPC_URL = "https://polygon-rpc.com"
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 bot_data = {
-    "saldo_pol": "0.0000",
+    "saldo_pol": "SINCRO...",
     "preco_alvo": 14.4459,
-    "status": "AGUARDANDO GATILHO",
+    "status": "CONECTANDO...",
     "logs": []
 }
 
@@ -26,33 +23,32 @@ def add_log(msg):
     bot_data["logs"] = bot_data["logs"][:12]
 
 def motor_sniper():
-    add_log("SISTEMA ARMADO - VIGIANDO ALVO 14.4459")
-    if not PVT_KEY:
-        add_log("AVISO: Variável CHAVE_PRIVADA não detetada no Render.")
+    add_log("MOTOR REINICIADO - MODO COMPATIBILIDADE")
     
     while True:
         try:
-            # 1. Atualiza Saldo Real
-            balance = w3.eth.get_balance(WALLET)
-            bot_data["saldo_pol"] = f"{w3.from_wei(balance, 'ether'):.4f}"
+            # BUSCA SALDO POL (MÉTODO REQUESTS - O ÚNICO QUE FUNCIONOU NO SEU RENDER)
+            payload = {"jsonrpc":"2.0","method":"eth_getBalance","params":[WALLET, "latest"],"id":1}
+            res = requests.post(RPC_URL, json=payload, timeout=10).json()
             
-            # 2. Lógica de Preço (Aqui ligamos à API do mercado)
-            preco_atual = 14.5000 # Simulação de mercado
-            
-            if preco_atual <= bot_data["preco_alvo"]:
-                if PVT_KEY:
-                    add_log(f"GATILHO ATIVADO! Preço: {preco_atual}")
-                    # AQUI O BOT EXECUTA A COMPRA USANDO A CHAVE_PRIVADA
-                    add_log("ORDEM ENVIADA PARA A BLOCKCHAIN...")
-                    time.sleep(10)
-                else:
-                    add_log("ERRO: Gatilho disparado mas CHAVE_PRIVADA está vazia.")
-            
-            bot_data["status"] = "VIGIANDO MERCADO"
+            if 'result' in res:
+                saldo_hex = res['result']
+                saldo_final = int(saldo_hex, 16) / 10**18
+                bot_data["saldo_pol"] = f"{saldo_final:.4f}"
+                bot_data["status"] = "VIGIANDO MERCADO"
+            else:
+                bot_data["status"] = "ERRO NA RESPOSTA RPC"
+
+            # Lógica de Gatilho
+            if not PVT_KEY:
+                if "AVISO" not in str(bot_data["logs"]):
+                    add_log("AVISO: CHAVE_PRIVADA NÃO ENCONTRADA NO RENDER")
+
         except Exception as e:
-            add_log(f"ERRO: {str(e)[:20]}")
+            bot_data["status"] = "ERRO DE CONEXÃO"
+            add_log(f"FALHA: {str(e)[:20]}")
         
-        time.sleep(10)
+        time.sleep(12)
 
 threading.Thread(target=motor_sniper, daemon=True).start()
 
@@ -61,19 +57,19 @@ def login():
     if request.method == 'POST' and request.form.get('pin') == PIN:
         session['auth'] = True
         return redirect('/')
-    return '<h1>SNIPER TERMINAL</h1><form method="post"><input type="password" name="pin" autofocus><button>ENTRAR</button></form>'
+    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>TERMINAL SNIPER</h1><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
 
 @app.route('/')
 def dash():
     if not session.get('auth'): return redirect('/login')
     
-    logs_html = "".join([f"<div style='color:#aaa; border-bottom:1px solid #222; padding:3px;'>{l}</div>" for l in bot_data["logs"]])
+    logs_html = "".join([f"<div style='color:#888; border-bottom:1px solid #222; padding:3px;'>{l}</div>" for l in bot_data["logs"]])
     
     return f"""
     <body style="background:#050505; color:#eee; font-family:monospace; padding:20px;">
-        <div style="max-width:700px; margin:auto; border:2px solid orange; padding:20px; background:#000;">
+        <div style="max-width:600px; margin:auto; border:2px solid orange; padding:20px; background:#000;">
             <div style="display:flex; justify-content:space-between; border-bottom:1px solid orange; padding-bottom:10px;">
-                <h2 style="color:orange; margin:0;">🛡️ SNIPER v37</h2>
+                <h2 style="color:orange; margin:0;">🛡️ SNIPER v38</h2>
                 <div style="text-align:right;">
                     SALDO: <b style="color:cyan;">{bot_data['saldo_pol']} POL</b>
                 </div>

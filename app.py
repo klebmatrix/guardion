@@ -9,25 +9,23 @@ from web3.middleware import ExtraDataToPOAMiddleware
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGURAÇÕES DA CARTEIRA ---
+# --- CONEXÃO E IDENTIDADE ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PRIV_KEY = os.getenv("private_key", "").strip()
-if PRIV_KEY and not PRIV_KEY.startswith("0x"): 
-    PRIV_KEY = "0x" + PRIV_KEY
+if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
 
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 
-# Conexão Web3
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-# Configurações de Estratégia
+# --- ESTRATÉGIA AGRESSIVA ---
 bot_config = {
     "status": "OFF", 
-    "alvos": ["BITCOIN", "BTC", "ETH", "FED", "TRUMP", "ELON", "WAR", "USA", "AI", "NVIDIA", "CRYPTO", "S&P", "DEBT"],
-    "min_price": 0.05, 
-    "max_price": 0.85
+    "min_price": 0.15, # Lucro mínimo de 15%
+    "max_price": 0.85, # Não entra em aposta ganha
+    "min_volume": 5000 # Só entra se tiver pelo menos $5k rodando (evita mercados mortos)
 }
 comprados = set()
 
@@ -41,69 +39,62 @@ def registrar_log(msg, lado="SCAN", res="OK"):
         with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
-async def executa_compra_inteligente(token_id, title, preco):
+async def executa_compra(token_id, title, preco):
     try:
         tx_data = "0x4b665675" + token_id.replace('0x','').zfill(64)
         tx = {
             'nonce': w3.eth.get_transaction_count(WALLET),
             'to': w3.to_checksum_address(EXCHANGE_ADDR),
             'value': 0, 'gas': 500000,
-            'gasPrice': int(w3.eth.gas_price * 1.5),
+            'gasPrice': int(w3.eth.gas_price * 1.6),
             'data': tx_data, 'chainId': 137
         }
         signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
         w3.eth.send_raw_transaction(signed.raw_transaction)
-        registrar_log(f"TIRO: {title[:12]}", "BLOCKCHAIN", "SUCESSO 🔥")
+        registrar_log(f"TIRO: {title[:15]}", "OPERAÇÃO", "SUCESSO 🔥")
         return True
-    except Exception as e:
-        registrar_log(f"Erro TX: {str(e)[:10]}", "WEB3", "FALHA")
-        return False
+    except: return False
 
-# --- MOTOR SNIPER COM FEEDBACK ---
+# --- MOTOR SNIPER DE ALTA FREQUÊNCIA ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Varre os mercados com mais volume
-                    res = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=25&sort=volume:desc")
+                    # Puxa os 50 mercados mais quentes do momento
+                    res = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=50&sort=volume:desc")
                     if res.status_code == 200:
                         eventos = res.json()
-                        total = len(eventos)
-                        pulados_preco = 0
-                        pulados_alvo = 0
-                        sucesso_ciclo = False
-
-                        for ev in eventos:
-                            title = str(ev.get('title', '')).upper()
-                            
-                            if any(p in title for p in bot_config["alvos"]):
-                                markets = ev.get('markets', [])
-                                if not markets: continue
-                                m_id = markets[0].get('id')
-                                if m_id in comprados: continue
-
-                                try:
-                                    prices = markets[0].get('outcomePrices', [])
-                                    if not prices: continue
-                                    preco_yes = float(prices[0])
-
-                                    if bot_config["min_price"] <= preco_yes <= bot_config["max_price"]:
-                                        if await executa_compra_inteligente(m_id, title, preco_yes):
-                                            comprados.add(m_id)
-                                            sucesso_ciclo = True
-                                            break 
-                                    else:
-                                        pulados_preco += 1
-                                except: continue
-                            else:
-                                pulados_alvo += 1
+                        analisados = 0
                         
-                        if not sucesso_ciclo:
-                            info = f"Visto:{total} | Fora Alvo:{pulados_alvo} | Preço Ruim:{pulados_preco}"
-                            registrar_log(info, "SNIPER", "ANALISANDO")
+                        for ev in eventos:
+                            analisados += 1
+                            markets = ev.get('markets', [])
+                            if not markets: continue
+                            
+                            m_id = markets[0].get('id')
+                            if m_id in comprados: continue
+
+                            # Filtro de Volume Real
+                            vol = float(ev.get('volume', 0))
+                            if vol < bot_config["min_volume"]: continue
+
+                            # Filtro de Preço
+                            try:
+                                prices = markets[0].get('outcomePrices', [])
+                                if not prices: continue
+                                p_yes = float(prices[0])
+
+                                if bot_config["min_price"] <= p_yes <= bot_config["max_price"]:
+                                    title = ev.get('title', 'Mercado')
+                                    if await executa_compra(m_id, title, p_yes):
+                                        comprados.add(m_id)
+                                        break # Um tiro por ciclo para segurança
+                            except: continue
+                        
+                        registrar_log(f"Vigiando {analisados} mercados ativos", "RADAR", "ON")
             except: pass
-        await asyncio.sleep(12)
+        await asyncio.sleep(10) # 10 segundos para não ser banido pela API
 
 @app.on_event("startup")
 async def startup_event():
@@ -111,7 +102,7 @@ async def startup_event():
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS DASHBOARD ---
+# --- ROTAS INTERFACE ---
 @app.get("/", response_class=HTMLResponse)
 async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
 
@@ -138,7 +129,7 @@ async def dashboard(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Motor {status}", "SISTEMA", "MODO")
+    registrar_log(f"Radar {status}", "SISTEMA", "MODO")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 @app.post("/destravar")
@@ -152,8 +143,8 @@ async def destravar():
         })
         signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
         w3.eth.send_raw_transaction(signed.raw_transaction)
-        registrar_log("USDC DESTRAVADO", "BLOCKCHAIN", "SUCESSO ✅")
-    except: registrar_log("Falha Destrave", "ERRO", "FALHA")
+        registrar_log("USDC LIBERADO", "BLOCKCHAIN", "OK ✅")
+    except: registrar_log("Erro Approve", "ERRO", "FALHA")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":

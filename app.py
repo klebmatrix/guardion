@@ -9,7 +9,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONEXÃO E IDENTIDADE ---
+# --- IDENTIDADE E CONEXÃO ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PRIV_KEY = os.getenv("private_key", "").strip()
 if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
@@ -20,14 +20,13 @@ EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-# --- ESTRATÉGIA AGRESSIVA ---
+# --- ESTRATÉGIA DE ALTA FREQUÊNCIA ---
 bot_config = {
     "status": "OFF", 
-    "min_price": 0.15, # Lucro mínimo de 15%
-    "max_price": 0.85, # Não entra em aposta ganha
-    "min_volume": 5000 # Só entra se tiver pelo menos $5k rodando (evita mercados mortos)
+    "min_price": 0.10, # Zona de entrada
+    "max_price": 0.88, # Zona de saída
+    "min_volume": 3000 # Filtro de liquidez para não travar o dinheiro
 }
-comprados = set()
 
 def registrar_log(msg, lado="SCAN", res="OK"):
     try:
@@ -41,31 +40,36 @@ def registrar_log(msg, lado="SCAN", res="OK"):
 
 async def executa_compra(token_id, title, preco):
     try:
+        # Buy Selector + ID
         tx_data = "0x4b665675" + token_id.replace('0x','').zfill(64)
         tx = {
             'nonce': w3.eth.get_transaction_count(WALLET),
             'to': w3.to_checksum_address(EXCHANGE_ADDR),
-            'value': 0, 'gas': 500000,
-            'gasPrice': int(w3.eth.gas_price * 1.6),
+            'value': 0, 'gas': 550000,
+            'gasPrice': int(w3.eth.gas_price * 1.6), # Prioridade alta para não perder a vaga
             'data': tx_data, 'chainId': 137
         }
         signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
         w3.eth.send_raw_transaction(signed.raw_transaction)
-        registrar_log(f"TIRO: {title[:15]}", "OPERAÇÃO", "SUCESSO 🔥")
+        registrar_log(f"TIRO: {title[:15]} @ {preco}", "OPERAÇÃO", "SUCESSO 🔥")
         return True
-    except: return False
+    except Exception as e:
+        print(f"Erro na transação: {e}")
+        return False
 
-# --- MOTOR SNIPER DE ALTA FREQUÊNCIA ---
+# --- MOTOR DE REENTRADA ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Puxa os 50 mercados mais quentes do momento
+                    # Monitorando os 50 maiores mercados para ação constante
                     res = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=50&sort=volume:desc")
                     if res.status_code == 200:
                         eventos = res.json()
                         analisados = 0
+                        pulados_vol = 0
+                        pulados_preco = 0
                         
                         for ev in eventos:
                             analisados += 1
@@ -73,28 +77,34 @@ async def sniper_loop():
                             if not markets: continue
                             
                             m_id = markets[0].get('id')
-                            if m_id in comprados: continue
-
-                            # Filtro de Volume Real
                             vol = float(ev.get('volume', 0))
-                            if vol < bot_config["min_volume"]: continue
+                            
+                            if vol < bot_config["min_volume"]:
+                                pulados_vol += 1
+                                continue
 
-                            # Filtro de Preço
                             try:
                                 prices = markets[0].get('outcomePrices', [])
                                 if not prices: continue
                                 p_yes = float(prices[0])
 
+                                # Lógica de Reentrada: Não checamos mais a lista 'comprados'
+                                # Se o preço está no range, o bot executa.
                                 if bot_config["min_price"] <= p_yes <= bot_config["max_price"]:
                                     title = ev.get('title', 'Mercado')
                                     if await executa_compra(m_id, title, p_yes):
-                                        comprados.add(m_id)
-                                        break # Um tiro por ciclo para segurança
+                                        # Pausa curta após compra para evitar spam de taxas
+                                        await asyncio.sleep(5)
+                                        break 
+                                else:
+                                    pulados_preco += 1
                             except: continue
                         
-                        registrar_log(f"Vigiando {analisados} mercados ativos", "RADAR", "ON")
-            except: pass
-        await asyncio.sleep(10) # 10 segundos para não ser banido pela API
+                        registrar_log(f"Análise: {analisados} | Longe do Alvo: {pulados_preco}", "RADAR", "VIGIANDO")
+            except Exception as e:
+                print(f"Erro conexão: {e}")
+        
+        await asyncio.sleep(10)
 
 @app.on_event("startup")
 async def startup_event():
@@ -102,7 +112,7 @@ async def startup_event():
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS INTERFACE ---
+# --- INTERFACE ---
 @app.get("/", response_class=HTMLResponse)
 async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
 

@@ -2,83 +2,88 @@ import os, asyncio, json, uvicorn, httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from web3 import Web3
 
 app = FastAPI()
 
-# Garante que a pasta templates exista
-if not os.path.exists("templates"):
-    os.makedirs("templates")
-
-templates = Jinja2Templates(directory="templates")
-
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO DIRETA ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PRIV_KEY = os.getenv("private_key", "").strip()
 if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
 
 bot_config = {"status": "OFF", "min_price": 0.10, "max_price": 0.88}
+logs = []
 
 def registrar_log(msg):
-    try:
-        agora = datetime.now().strftime("%H:%M:%S")
-        dados = []
-        if os.path.exists("logs.json"):
-            with open("logs.json", "r") as f: dados = json.load(f)
-        dados.insert(0, {"data": agora, "mercado": msg, "lado": "RADAR", "resultado": "ON"})
-        with open("logs.json", "w") as f: json.dump(dados[:20], f)
-    except: pass
+    agora = datetime.now().strftime("%H:%M:%S")
+    logs.insert(0, f"[{agora}] {msg}")
+    if len(logs) > 20: logs.pop()
 
-# --- MOTOR SNIPER ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Busca Polymarket
-                    await client.get("https://gamma-api.polymarket.com/events?active=true&limit=10")
-                    registrar_log("Vigiando Polymarket...")
-                    # Busca DexSport
+                    # Varre Polymarket e Esportes
+                    await client.get("https://gamma-api.polymarket.com/events?active=true&limit=5")
+                    registrar_log("Radar: Polymarket OK")
                     await client.get("https://api.dexsport.io/v1/events/active?chainId=137")
-                    registrar_log("Vigiando Esportes...")
-            except: 
-                registrar_log("Erro de conexao API")
-        await asyncio.sleep(20)
+                    registrar_log("Radar: Esportes OK")
+            except:
+                registrar_log("Erro na varredura")
+        await asyncio.sleep(15)
 
 @app.on_event("startup")
-async def startup_event():
-    if not os.path.exists("logs.json"):
-        with open("logs.json", "w") as f: json.dump([], f)
+async def startup():
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS PRINCIPAIS ---
+# --- INTERFACE HTML EMBUTIDA (SEM PASTAS) ---
+def gerar_html():
+    log_html = "".join([f"<li style='color:#00ff00;font-family:monospace;'>{l}</li>" for l in logs])
+    status_cor = "green" if bot_config["status"] == "ON" else "red"
+    return f"""
+    <html>
+        <head><title>SNIPER DASHBOARD</title></head>
+        <body style="background:#111; color:white; font-family:sans-serif; text-align:center;">
+            <h1>🚀 SNIPER MULTI-MERCADO</h1>
+            <div style="border:1px solid #333; padding:20px; display:inline-block;">
+                <p>Status: <b style="color:{status_cor};">{bot_config["status"]}</b></p>
+                <form action="/toggle_bot" method="post">
+                    <input type="hidden" name="status" value="{"OFF" if bot_config["status"] == "ON" else "ON"}">
+                    <button style="padding:10px 20px; cursor:pointer;">{"PARAR BOT" if bot_config["status"] == "ON" else "LIGAR BOT"}</button>
+                </form>
+            </div>
+            <div style="margin-top:20px; text-align:left; display:inline-block; width:80%; background:#222; padding:10px;">
+                <h3>📜 LOG DE ATIVIDADES:</h3>
+                <ul>{log_html}</ul>
+            </div>
+        </body>
+    </html>
+    """
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    try:
-        return templates.TemplateResponse("login.html", {"request": request})
-    except Exception as e:
-        return f"<h1>ERRO CRITICO</h1><p>A pasta 'templates' com login.html nao foi encontrada no GitHub.</p><p>Erro: {e}</p>"
+async def login_page():
+    return """
+    <html>
+        <body style="background:#111; color:white; text-align:center; padding-top:100px;">
+            <form action="/entrar" method="post">
+                <h2>DIGITE O PIN:</h2>
+                <input type="password" name="pin" style="padding:10px;">
+                <button type="submit" style="padding:10px;">ENTRAR</button>
+            </form>
+        </body>
+    </html>
+    """
 
 @app.post("/entrar")
-async def entrar(pin: str = Form(...)):
-    pin_correto = str(os.getenv("guardiao", "20262026")).strip()
-    if pin.strip() == pin_correto:
+async def validar(pin: str = Form(...)):
+    if pin == os.getenv("guardiao", "20262026"):
         return RedirectResponse(url="/dashboard", status_code=303)
     return "PIN INCORRETO"
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dash(request: Request):
-    logs = []
-    if os.path.exists("logs.json"):
-        with open("logs.json", "r") as f: logs = json.load(f)
-    try:
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request, "wallet": WALLET, "bot": bot_config, "historico": logs, "pol": 0, "usdc": 0
-        })
-    except:
-        return "<h1>ERRO: dashboard.html nao encontrado na pasta templates.</h1>"
+async def dash():
+    return gerar_html()
 
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
@@ -87,5 +92,4 @@ async def toggle(status: str = Form(...)):
     return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

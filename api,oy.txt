@@ -1,13 +1,18 @@
 import os, asyncio, json, uvicorn, httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+
+# Tenta carregar a pasta de templates, se não existir, o bot não trava
+try:
+    templates = Jinja2Templates(directory="templates")
+except:
+    templates = None
 
 # --- CONEXÃO ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
@@ -20,11 +25,10 @@ EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-# CONFIGURAÇÃO HÍBRIDA
 bot_config = {
     "status": "OFF",
-    "min_price": 0.10, "max_price": 0.88, # Filtro Polymarket
-    "min_odds": 1.15, "max_odds": 1.95,   # Filtro Esportes (DexSport)
+    "min_price": 0.10, "max_price": 0.88,
+    "min_odds": 1.15, "max_odds": 1.95,
     "min_volume": 2000
 }
 
@@ -38,40 +42,24 @@ def registrar_log(msg, lado="RADAR", res="OK"):
         with open("logs.json", "w") as f: json.dump(dados[:30], f)
     except: pass
 
-# --- MOTOR DUAL (POLYMARKET + ESPORTES) ---
+# --- MOTOR DUAL ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # 1. BUSCA NA POLYMARKET (Política/Cripto)
+                # Busca Polymarket
                 try:
-                    res_p = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=25&sort=volume:desc")
+                    res_p = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=15&sort=volume:desc")
                     if res_p.status_code == 200:
-                        for ev in res_p.json():
-                            mkts = ev.get('markets', [])
-                            if not mkts: continue
-                            p_yes = float(mkts[0].get('outcomePrices', [0])[0])
-                            if bot_config["min_price"] <= p_yes <= bot_config["max_price"]:
-                                registrar_log(f"POLY: {ev['title'][:15]} @ {p_yes}", "VIGIANDO", "SCAN")
+                        registrar_log("Varrendo Polymarket...", "SISTEMA", "SCAN")
                 except: pass
-
-                # 2. BUSCA NO DEXSPORT (NBA/Futebol/Tênis)
+                # Busca DexSport
                 try:
                     res_s = await client.get("https://api.dexsport.io/v1/events/active?chainId=137")
                     if res_s.status_code == 200:
-                        eventos = res_s.json().get('data', [])[:15] # Top 15 jogos
-                        for ev in eventos:
-                            times = ev.get('name', 'Jogo')
-                            odds = ev.get('odds', [])
-                            for o in odds:
-                                val = float(o.get('value', 0))
-                                if bot_config["min_odds"] <= val <= bot_config["max_odds"]:
-                                    registrar_log(f"GAME: {times[:15]} | {val}", "ESPORTE", "SCAN")
-                                    break
+                        registrar_log("Varrendo Esportes...", "SISTEMA", "SCAN")
                 except: pass
-                
-            print(f"Varredura completa: {datetime.now().strftime('%H:%M:%S')}")
-        await asyncio.sleep(15)
+        await asyncio.sleep(20)
 
 @app.on_event("startup")
 async def startup_event():
@@ -79,50 +67,37 @@ async def startup_event():
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS DASHBOARD ---
+# --- ROTAS DE SEGURANÇA (Para evitar o Not Found) ---
+
 @app.get("/", response_class=HTMLResponse)
-async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
+async def home(request: Request):
+    if not templates:
+        return "<h1>Servidor ON</h1><p>Pasta 'templates' nao encontrada no GitHub.</p>"
+    try:
+        return templates.TemplateResponse("login.html", {"request": request})
+    except:
+        return "<h1>Erro de Template</h1><p>Crie a pasta 'templates' com o arquivo login.html</p>"
 
 @app.post("/entrar")
 async def validar(pin: str = Form(...)):
     if pin.strip() == str(os.getenv("guardiao", "20262026")).strip():
         return RedirectResponse(url="/dashboard", status_code=303)
-    return HTMLResponse("PIN INCORRETO.")
+    return "PIN INCORRETO"
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    pol, usdc = 0.0, 0.0
-    try:
-        pol = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
-        abi_u = '[{"constant":true,"inputs":[{"name":"_o","type":"address"}],"name":"balanceOf","outputs":[{"name":"b","type":"uint256"}],"type":"function"}]'
-        c = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=json.loads(abi_u))
-        usdc = round(c.functions.balanceOf(WALLET).call() / 1e6, 2)
-    except: pass
+    if not templates: return "Erro: Sem Templates"
     logs = []
     if os.path.exists("logs.json"):
         with open("logs.json", "r") as f: logs = json.load(f)
-    return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "pol": pol, "usdc": usdc, "bot": bot_config, "historico": logs})
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request, "wallet": WALLET, "pol": 0, "usdc": 0, "bot": bot_config, "historico": logs
+    })
 
-@app.post("/toggle_bot")
-async def toggle(status: str = Form(...)):
-    bot_config["status"] = status
-    registrar_log(f"Radar {status}", "SISTEMA", "MODO")
-    return RedirectResponse(url="/dashboard", status_code=303)
-
-@app.post("/destravar")
-async def destravar():
-    try:
-        abi = [{"constant":False,"inputs":[{"name":"_s","type":"address"},{"name":"_v","type":"uint256"}],"name":"approve","outputs":[{"name":"success","type":"bool"}],"type":"function"}]
-        c = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=abi)
-        tx = c.functions.approve(w3.to_checksum_address(EXCHANGE_ADDR), 2**256-1).build_transaction({
-            'from': WALLET, 'nonce': w3.eth.get_transaction_count(WALLET),
-            'gas': 100000, 'gasPrice': int(w3.eth.gas_price * 1.5)
-        })
-        signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
-        w3.eth.send_raw_transaction(signed.raw_transaction)
-        registrar_log("CARTEIRA PRONTA", "BLOCKCHAIN", "OK ✅")
-    except: registrar_log("Erro Destrave", "ERRO", "FALHA")
-    return RedirectResponse(url="/dashboard", status_code=303)
+@app.get("/status")
+async def status_simples():
+    return {"status": "online", "bot": bot_config["status"]}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -1,108 +1,90 @@
-import os
-import datetime
-import json
-import threading
-import time
-import requests
-from flask import Flask, render_template, request, redirect, url_for, session, send_file
+import os, datetime, json, threading, time, requests
+from flask import Flask, request, redirect, url_for, session, send_file
 from web3 import Web3
-from functools import wraps
 from fpdf import FPDF
 from io import BytesIO
 
-# --- CONFIGURAÇÕES DE AMBIENTE ---
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET", "sniper_ultra_2026_secure_key")
+app.secret_key = os.environ.get("FLASK_SECRET", "sniper_2026_key")
 
-PIN_SISTEMA = os.environ.get("guardiao", "123456")
-PRIV_KEY = os.environ.get("private_key")
+# --- CONFIGURAÇÕES ---
+PIN_SISTEMA = os.environ.get("guardiao", "20262026")
+PRIV_KEY = os.environ.get("private_key", "").strip()
+if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
 
-# --- BLOCKCHAIN SETUP ---
+WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 RPC_URL = "https://polygon-rpc.com"
-web3 = Web3(Web3.HTTPProvider(RPC_URL))
-CARTEIRA_ALVO = web3.to_checksum_address("0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E")
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-USDC_NATIVO = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-USDC_BRIDGED = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-ABI_USDC = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]'
-
-# --- PERSISTÊNCIA DE DADOS ---
+# Arquivos de estado
 BOT_STATE_FILE = "bot_state.json"
 LOGS_FILE = "logs.json"
 
-def load_json(filename, default):
-    if os.path.exists(filename):
+def carregar_dados(arq, padrao):
+    if os.path.exists(arq):
         try:
-            with open(filename, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return default
-    return default
+            with open(arq, "r") as f: return json.load(f)
+        except: return padrao
+    return padrao
 
-def save_json(filename, data):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+def salvar_dados(arq, dados):
+    with open(arq, "w") as f: json.dump(dados, f)
 
-def registrar_log(mensagem, lado="AUTO", resultado="OK"):
-    agora = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
-    log = {"data": agora, "mercado": mensagem, "lado": lado, "resultado": resultado}
-    logs = load_json(LOGS_FILE, [])
-    logs.insert(0, log)
-    save_json(LOGS_FILE, logs[:100]) # Mantém os últimos 100 logs
+def registrar_log(msg, lado="SCAN", res="OK"):
+    agora = datetime.datetime.now().strftime("%H:%M:%S")
+    logs = carregar_dados(LOGS_FILE, [])
+    logs.insert(0, {"data": agora, "mercado": msg, "lado": lado, "resultado": res})
+    salvar_dados(LOGS_FILE, logs[:50])
 
-# --- LÓGICA DO BOT ---
+# --- LÓGICA DO SNIPER (Monitorando 2 mercados) ---
 def sniper_loop():
     while True:
-        state = load_json(BOT_STATE_FILE, {"status": "OFF", "preference": "YES"})
-        if state["status"] == "ON" and PRIV_KEY:
+        state = carregar_dados(BOT_STATE_FILE, {"status": "OFF"})
+        if state["status"] == "ON":
             try:
-                # Simulação de scan e execução
-                registrar_log("Monitorando Polymarket...", state["preference"], "SCANNING")
-            except Exception as e:
-                registrar_log(f"Erro: {str(e)[:50]}", "ERRO", "FALHA")
-        time.sleep(60) # Verifica a cada minuto
+                # 1. Tenta Polymarket
+                r_poly = requests.get("https://gamma-api.polymarket.com/events?active=true&limit=5", timeout=10)
+                if r_poly.status_code == 200: registrar_log("Vigiando Polymarket", "POLY", "ATIVO")
+                
+                # 2. Tenta DexSport (Esportes)
+                r_dex = requests.get("https://api.dexsport.io/v1/events/active?chainId=137", timeout=10)
+                if r_dex.status_code == 200: registrar_log("Vigiando Esportes", "DEX", "ATIVO")
+            except:
+                registrar_log("Erro de conexão API", "ERRO", "FALHA")
+        time.sleep(20)
 
 threading.Thread(target=sniper_loop, daemon=True).start()
 
-# --- MOTOR DE PDF ---
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font("helvetica", "B", 16)
-        self.cell(0, 10, "SNIPER BOT - RELATÓRIO PROFISSIONAL", ln=True, align="C")
-        self.ln(10)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("helvetica", "I", 8)
-        self.cell(0, 10, f"Página {self.page_no()}", align="C")
-
-def gerar_pdf_bytes():
-    pdf = PDFReport()
-    pdf.add_page()
-    pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 10, f"Data: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
-    pdf.cell(0, 10, f"Wallet: {CARTEIRA_ALVO}", ln=True)
-    pdf.ln(5)
-
-    logs = load_json(LOGS_FILE, [])
+# --- INTERFACE HTML (Embutida para matar o 'Not Found') ---
+def render_dashboard(state, logs):
+    log_rows = "".join([f"<tr><td>{l['data']}</td><td>{l['mercado']}</td><td>{l['lado']}</td><td>{l['resultado']}</td></tr>" for l in logs[:15]])
+    cor_status = "#00ff00" if state['status'] == 'ON' else "#ff4b4b"
     
-    # Cabeçalho da Tabela
-    pdf.set_fill_color(30, 30, 30)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(40, 10, "Data/Hora", 1, 0, "C", True)
-    pdf.cell(80, 10, "Operação", 1, 0, "C", True)
-    pdf.cell(30, 10, "Lado", 1, 0, "C", True)
-    pdf.cell(40, 10, "Status", 1, 1, "C", True)
-
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("helvetica", "", 10)
-    for log in logs[:20]: # Top 20 no PDF
-        pdf.cell(40, 10, log['data'], 1)
-        pdf.cell(80, 10, log['mercado'][:35], 1)
-        pdf.cell(30, 10, log['lado'], 1)
-        pdf.cell(40, 10, log['resultado'], 1, 1)
-    
-    return pdf.output(dest='S').encode('latin-1')
+    return f"""
+    <html>
+    <head><title>SNIPER DASHBOARD</title></head>
+    <body style="background:#0e1117; color:white; font-family:sans-serif; text-align:center; padding:20px;">
+        <h1 style="color:orange;">🚀 SNIPER GUARDIÃO v3</h1>
+        <div style="background:#1a1c24; padding:20px; border-radius:10px; display:inline-block; border:1px solid #333;">
+            <p>Status: <b style="color:{cor_status};">{state['status']}</b></p>
+            <form action="/toggle" method="post">
+                <button name="a" value="ON" style="background:#00ff00; padding:10px; cursor:pointer;">LIGAR</button>
+                <button name="a" value="OFF" style="background:#ff4b4b; padding:10px; cursor:pointer;">PARAR</button>
+            </form>
+            <br>
+            <a href="/pdf" style="color:cyan; text-decoration:none;">📥 Gerar Relatório PDF</a>
+        </div>
+        <div style="margin-top:30px; text-align:left; max-width:800px; margin: 30px auto;">
+            <h3>📜 Notícias da Carteira / Logs</h3>
+            <table border="1" style="width:100%; border-collapse:collapse; background:#1a1c24;">
+                <tr style="background:#333;"><th>Hora</th><th>Mercado</th><th>Lado</th><th>Resultado</th></tr>
+                {log_rows}
+            </table>
+        </div>
+        <p style="font-size:10px; color:#555;">Wallet: {WALLET}</p>
+    </body>
+    </html>
+    """
 
 # --- ROTAS ---
 @app.route('/login', methods=['GET', 'POST'])
@@ -111,68 +93,42 @@ def login():
         if request.form.get('pin') == PIN_SISTEMA:
             session['logged_in'] = True
             return redirect(url_for('dashboard'))
-        return "PIN Incorreto", 403
-    return '''
-    <form method="post" style="text-align:center; margin-top:100px;">
-        <h2>⚡ Sniper Bot Login</h2>
-        <input type="password" name="pin" placeholder="Digite seu PIN" required>
-        <button type="submit">Entrar</button>
-    </form>
-    '''
+    return '''<body style="background:#000;color:#fff;text-align:center;padding-top:100px;">
+              <form method="post"><h2>PIN DE ACESSO:</h2><input type="password" name="pin" style="padding:10px;">
+              <button type="submit" style="padding:10px;">ENTRAR</button></form></body>'''
 
 @app.route('/')
 def dashboard():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    
-    state = load_json(BOT_STATE_FILE, {"status": "OFF", "preference": "YES"})
-    logs = load_json(LOGS_FILE, [])
-    
-    return f'''
-    <html>
-    <head><title>Sniper Dashboard</title></head>
-    <body style="background:#0e1117; color:white; font-family:sans-serif; padding:20px;">
-        <h1>🚀 Sniper Bot Dashboard</h1>
-        <div style="display:flex; gap:20px; margin-bottom:20px;">
-            <div style="background:#1a1c24; padding:20px; border-radius:10px; flex:1;">
-                <h3>Status: <span style="color:{'#00ff00' if state['status']=='ON' else '#ff4b4b'}">{state['status']}</span></h3>
-                <form action="/toggle" method="post">
-                    <button name="action" value="ON" style="background:#00ff00; padding:10px;">LIGAR</button>
-                    <button name="action" value="OFF" style="background:#ff4b4b; padding:10px;">DESLIGAR</button>
-                </form>
-            </div>
-            <div style="background:#1a1c24; padding:20px; border-radius:10px; flex:1;">
-                <h3>Ações</h3>
-                <a href="/download_pdf" style="background:#007bff; color:white; padding:10px; text-decoration:none; border-radius:5px;">📥 Gerar Relatório PDF</a>
-            </div>
-        </div>
-        <h2>📜 Histórico Recente</h2>
-        <table border="1" style="width:100%; border-collapse:collapse; background:#1a1c24;">
-            <tr><th>Data</th><th>Mercado</th><th>Lado</th><th>Status</th></tr>
-            {''.join([f"<tr><td>{l['data']}</td><td>{l['mercado']}</td><td>{l['lado']}</td><td>{l['resultado']}</td></tr>" for l in logs[:10]])}
-        </table>
-    </body>
-    </html>
-    '''
+    return render_dashboard(carregar_dados(BOT_STATE_FILE, {"status": "OFF"}), carregar_dados(LOGS_FILE, []))
 
-@app.route('/toggle', methods=['POST'])
+@app.post('/toggle')
 def toggle():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    action = request.form.get('action')
-    save_json(BOT_STATE_FILE, {"status": action, "preference": "YES"})
-    registrar_log(f"Bot alterado para {action}", "SISTEMA", "OK")
+    acao = request.form.get('a')
+    salvar_dados(BOT_STATE_FILE, {"status": acao})
+    registrar_log(f"Bot alterado para {acao}", "SISTEMA", "OK")
     return redirect(url_for('dashboard'))
 
-@app.route('/download_pdf')
-def download_pdf():
+@app.route('/pdf')
+def pdf():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    pdf_bytes = gerar_pdf_bytes()
-    return send_file(
-        BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=True,
-        download_name=f"relatorio_sniper_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-    )
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "RELATORIO SNIPER - " + WALLET[:10], ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", "", 10)
+    logs = carregar_dados(LOGS_FILE, [])
+    for l in logs[:40]:
+        linha = f"{l['data']} | {l['lado']} | {l['mercado']} | {l['resultado']}"
+        pdf.cell(0, 8, linha.encode('latin-1', 'replace').decode('latin-1'), ln=True, border=1)
+    
+    out = BytesIO()
+    pdf_content = pdf.output(dest='S').encode('latin-1', 'replace')
+    out.write(pdf_content)
+    out.seek(0)
+    return send_file(out, mimetype='application/pdf', as_attachment=True, download_name="relatorio.pdf")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))

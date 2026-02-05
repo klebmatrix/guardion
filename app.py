@@ -1,4 +1,4 @@
-import os, datetime, json, threading, time, requests
+import os, datetime, requests
 from flask import Flask, request, redirect, url_for, session
 
 app = Flask(__name__)
@@ -10,78 +10,52 @@ WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PVT_KEY = os.environ.get("CHAVE_PRIVADA") 
 RPC_URL = "https://polygon-rpc.com"
 
-bot_data = {
-    "saldo_pol": "SINCRO...",
-    "preco_alvo": 14.4459,
-    "status": "CONECTANDO...",
-    "logs": []
-}
-
-def add_log(msg):
-    agora = datetime.datetime.now().strftime("%H:%M:%S")
-    bot_data["logs"].insert(0, f"[{agora}] {msg}")
-    bot_data["logs"] = bot_data["logs"][:12]
-
-def motor_sniper():
-    add_log("MOTOR REINICIADO - MODO COMPATIBILIDADE")
-    
-    while True:
-        try:
-            # BUSCA SALDO POL (MÉTODO REQUESTS - O ÚNICO QUE FUNCIONOU NO SEU RENDER)
-            payload = {"jsonrpc":"2.0","method":"eth_getBalance","params":[WALLET, "latest"],"id":1}
-            res = requests.post(RPC_URL, json=payload, timeout=10).json()
-            
-            if 'result' in res:
-                saldo_hex = res['result']
-                saldo_final = int(saldo_hex, 16) / 10**18
-                bot_data["saldo_pol"] = f"{saldo_final:.4f}"
-                bot_data["status"] = "VIGIANDO MERCADO"
-            else:
-                bot_data["status"] = "ERRO NA RESPOSTA RPC"
-
-            # Lógica de Gatilho
-            if not PVT_KEY:
-                if "AVISO" not in str(bot_data["logs"]):
-                    add_log("AVISO: CHAVE_PRIVADA NÃO ENCONTRADA NO RENDER")
-
-        except Exception as e:
-            bot_data["status"] = "ERRO DE CONEXÃO"
-            add_log(f"FALHA: {str(e)[:20]}")
-        
-        time.sleep(12)
-
-threading.Thread(target=motor_sniper, daemon=True).start()
+def obter_saldo_real():
+    try:
+        payload = {"jsonrpc":"2.0","method":"eth_getBalance","params":[WALLET, "latest"],"id":1}
+        res = requests.post(RPC_URL, json=payload, timeout=8).json()
+        if 'result' in res:
+            valor_wei = int(res['result'], 16)
+            return f"{valor_wei / 10**18:.4f}"
+    except:
+        return "ERRO_RPC"
+    return "0.0000"
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST' and request.form.get('pin') == PIN:
         session['auth'] = True
         return redirect('/')
-    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>TERMINAL SNIPER</h1><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
+    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>LOGIN TERMINAL</h1><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
 
 @app.route('/')
 def dash():
     if not session.get('auth'): return redirect('/login')
     
-    logs_html = "".join([f"<div style='color:#888; border-bottom:1px solid #222; padding:3px;'>{l}</div>" for l in bot_data["logs"]])
-    
+    # Busca o saldo NO MOMENTO do acesso
+    saldo_atual = obter_saldo_real()
+    alvo = 14.4459
+    status = "PRONTO PARA OPERAR" if PVT_KEY else "AVISO: SEM CHAVE_PRIVADA"
+
     return f"""
     <body style="background:#050505; color:#eee; font-family:monospace; padding:20px;">
-        <div style="max-width:600px; margin:auto; border:2px solid orange; padding:20px; background:#000;">
-            <div style="display:flex; justify-content:space-between; border-bottom:1px solid orange; padding-bottom:10px;">
-                <h2 style="color:orange; margin:0;">🛡️ SNIPER v38</h2>
+        <div style="max-width:600px; margin:auto; border:2px solid orange; padding:20px; background:#000; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; border-bottom:2px solid orange; padding-bottom:10px; margin-bottom:20px;">
+                <h2 style="color:orange; margin:0;">🛡️ SNIPER v39</h2>
                 <div style="text-align:right;">
-                    SALDO: <b style="color:cyan;">{bot_data['saldo_pol']} POL</b>
+                    SALDO: <b style="color:cyan; font-size:20px;">{saldo_atual} POL</b>
                 </div>
             </div>
             
-            <div style="margin:20px 0; padding:15px; background:#111; border-left:5px solid lime;">
-                STATUS: <b>{bot_data['status']}</b> | ALVO: <b style="color:magenta;">{bot_data['preco_alvo']}</b>
+            <div style="padding:15px; background:#111; border-left:5px solid {'lime' if PVT_KEY else 'red'}; margin-bottom:20px;">
+                <b>STATUS:</b> {status}<br>
+                <b>ALVO ATUAL:</b> <span style="color:magenta;">{alvo}</span>
             </div>
 
-            <div style="background:#0a0a0a; border:1px solid #333; height:200px; overflow-y:auto; padding:10px;">
-                <small style="color:#444;">LOGS:</small><br>
-                {logs_html}
+            <div style="background:#0a0a0a; border:1px solid #333; padding:15px; color:#666; font-size:12px;">
+                <p>• Carteira: {WALLET}</p>
+                <p>• Transações: Assinatura via CHAVE_PRIVADA</p>
+                <p>• Rede: Polygon Mainnet (RPC Cloudflare)</p>
             </div>
         </div>
         <script>setTimeout(()=>location.reload(), 10000);</script>

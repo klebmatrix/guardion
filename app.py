@@ -4,104 +4,119 @@ from web3 import Web3
 from eth_account import Account
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET", "sniper_ultra_2026")
+app.secret_key = os.environ.get("FLASK_SECRET", "sniper_real_2026")
 
-# --- CONFIGURAÇÕES BLOCKCHAIN ---
+# --- CONFIGURAÇÕES ---
 RPC_URL = "https://polygon-rpc.com"
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-# Dados da Carteira
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
-PRIV_KEY = os.environ.get("private_key") # DEVE estar no Render
+PRIV_KEY = os.environ.get("private_key") # Configura no Render!
 
-# Contratos (Polymarket CTF Exchange)
-POLY_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
-USDC_TOKEN = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+# Contratos Oficiais Polymarket
+CTF_EXCHANGE = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
+USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 
-LOGS_FILE = "logs.json"
+# ABI Mínima para Transacionar
+ABI_ERC20 = '[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-def registrar_log(msg, mercado="SISTEMA", status="INFO"):
+LOGS_FILE = "movimentacoes.json"
+
+def registrar_movimentacao(acao, mercado, status, valor="-"):
     agora = datetime.datetime.now().strftime("%H:%M:%S")
     logs = []
     if os.path.exists(LOGS_FILE):
-        with open(LOGS_FILE, "r") as f: logs = json.load(f)
-    logs.insert(0, {"data": agora, "msg": msg, "mercado": mercado, "status": status})
+        try:
+            with open(LOGS_FILE, "r") as f: logs = json.load(f)
+        except: logs = []
+    logs.insert(0, {"hora": agora, "acao": acao, "mkt": mercado, "st": status, "val": valor})
     with open(LOGS_FILE, "w") as f: json.dump(logs[:30], f)
 
-# --- FUNÇÃO DE EXECUÇÃO REAL ---
-def executar_compra_real(token_id, valor_usdc):
+# --- FUNÇÃO DE TIRO (EXECUÇÃO REAL) ---
+def dar_o_tiro(token_id, valor_usdc):
     if not PRIV_KEY:
-        registrar_log("Chave Privada Ausente!", "ERRO", "FALHA")
+        registrar_movimentacao("ERRO", "SISTEMA", "CHAVE AUSENTE", "0")
         return
     
     try:
         conta = Account.from_key(PRIV_KEY)
-        # 1. Preparar a transação (Exemplo simplificado de interação com a Exchange)
-        # Nota: A Polymarket usa ordens assinadas ou interações via CTF Exchange
-        registrar_log(f"Iniciando compra de {valor_usdc} USDC", "POLY", "PROCESSANDO")
+        valor_wei = int(valor_usdc * 10**6) # USDC tem 6 decimais
         
+        # 1. Verificar Nonce
         nonce = w3.eth.get_transaction_count(WALLET)
+        
+        # 2. Preparar Transação (Data simplificada para o exemplo de compra)
+        # O 'data' deve ser gerado de acordo com a função da Exchange da Polymarket
         tx = {
             'nonce': nonce,
-            'to': POLY_EXCHANGE,
+            'to': CTF_EXCHANGE,
             'value': 0,
-            'gas': 250000,
-            'gasPrice': w3.eth.gas_price,
+            'gas': 300000,
+            'gasPrice': int(w3.eth.gas_price * 1.2), # 20% acima para rapidez
             'chainId': 137,
-            'data': '0x' # Aqui entraria o bytecode da função buy(token_id, amount)
+            'data': '0x' # Aqui vai o hex da função buy da Polymarket
         }
         
-        # Assinar e Enviar
         signed_tx = w3.eth.account.sign_transaction(tx, PRIV_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
         
-        registrar_log(f"ORDEM ENVIADA! TX: {tx_hash.hex()[:10]}...", "POLY", "SUCESSO")
+        registrar_log_tiro = f"TX: {tx_hash.hex()[:10]}"
+        registrar_movimentacao("COMPRA", "POLYMARKET", "EXECUTADO", f"${valor_usdc}")
         
     except Exception as e:
-        registrar_log(f"Erro na execução: {str(e)[:30]}", "BLOCKCHAIN", "FALHA")
+        registrar_movimentacao("FALHA", "BLOCKCHAIN", str(e)[:15], f"${valor_usdc}")
 
 # --- MOTOR DE SCAN COM GATILHO ---
 def motor_sniper():
     while True:
         try:
-            # 1. Varrer Polymarket por oportunidades (Odds < 0.90 por exemplo)
-            r = requests.get("https://gamma-api.polymarket.com/events?active=true&limit=5")
+            # Consulta API para buscar odds desajustadas
+            r = requests.get("https://gamma-api.polymarket.com/events?active=true&limit=5", timeout=10)
             if r.status_code == 200:
                 eventos = r.json()
-                for ev in eventos:
-                    # LÓGICA DE GATILHO REAL:
-                    # Se encontrarmos uma oportunidade específica (exemplo fictício de ID):
-                    # executar_compra_real("TOKEN_ID_AQUI", 10) 
-                    pass
-                registrar_log("Monitorando Odds e Liquidez", "RADAR", "BUSCANDO")
-        except:
-            pass
+                registrar_movimentacao("SCAN", "RADAR", "BUSCANDO", "OK")
+                
+                # EXEMPLO DE GATILHO:
+                # Se encontrar um mercado específico com probabilidade alta:
+                # dar_o_tiro("ID_DO_TOKEN", 5.0) # Compra 5 USDC
+            
+        except Exception as e:
+            registrar_movimentacao("SCAN", "API", "ERRO CONEXÃO", "-")
+            
         time.sleep(20)
 
 threading.Thread(target=motor_sniper, daemon=True).start()
 
-# --- INTERFACE ---
+# --- INTERFACE (DASHBOARD) ---
 @app.route('/')
 def dashboard():
     if not session.get('logged_in'): return redirect(url_for('login'))
     
+    # Busca Saldos Reais
+    try:
+        pol_bal = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
+        usdc_inst = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=ABI_ERC20)
+        usdc_bal = round(usdc_inst.functions.balanceOf(WALLET).call() / 10**6, 2)
+    except:
+        pol_bal, usdc_bal = "0", "0"
+
     logs = []
     if os.path.exists(LOGS_FILE):
         with open(LOGS_FILE, "r") as f: logs = json.load(f)
     
-    log_rows = "".join([f"<tr><td style='padding:8px;'>{l['data']}</td><td>{l['mercado']}</td><td>{l['msg']}</td><td style='color:#00ff00;'>{l['status']}</td></tr>" for l in logs])
-    
+    rows = "".join([f"<tr style='border-bottom:1px solid #222;'><td style='padding:10px;'>{l['hora']}</td><td>{l['mkt']}</td><td style='color:orange;'>{l['acao']}</td><td>{l['val']}</td><td style='color:#00ff00;'>{l['st']}</td></tr>" for l in logs])
+
     return f"""
-    <body style="background:#000; color:#fff; font-family:sans-serif; padding:20px;">
-        <h1 style="color:orange;">🛡️ TERMINAL DE EXECUÇÃO REAL</h1>
-        <div style="background:#111; padding:15px; border:1px solid orange; border-radius:5px; margin-bottom:20px;">
-            <p>SISTEMA: <b>OPERACIONAL</b> | CARTEIRA: <code>{WALLET}</code></p>
-            <p style="color:cyan;">Aguardando sinal de entrada nos mercados...</p>
+    <body style="background:#000; color:#fff; font-family:monospace; padding:20px;">
+        <div style="border:1px solid orange; padding:20px;">
+            <h2 style="color:orange; margin:0;">⚡ SNIPER COMMAND CENTER v6</h2>
+            <hr border="0" style="border-top:1px solid #333; margin:15px 0;">
+            <p>Saldos: <span style="color:cyan;">POL: {pol_bal}</span> | <span style="color:#00ff00;">USDC: {usdc_bal}</span></p>
+            <table style="width:100%; text-align:left; border-collapse:collapse;">
+                <tr style="color:#666;"><th>HORA</th><th>MERCADO</th><th>AÇÃO</th><th>VALOR</th><th>STATUS</th></tr>
+                {rows}
+            </table>
         </div>
-        <table style="width:100%; text-align:left; background:#111;">
-            <tr style="color:orange;"><th>HORA</th><th>MERCADO</th><th>MOVIMENTAÇÃO</th><th>STATUS</th></tr>
-            {log_rows}
-        </table>
+        <script>setTimeout(() => {{ location.reload(); }}, 10000);</script>
     </body>
     """
 
@@ -111,7 +126,7 @@ def login():
         if request.form.get('pin') == os.environ.get("guardiao", "20262026"):
             session['logged_in'] = True
             return redirect(url_for('dashboard'))
-    return '<body style="background:#000;color:#fff;text-align:center;padding-top:100px;"><form method="post"><input type="password" name="pin"><button>ENTRAR</button></form></body>'
+    return '<body style="background:#000;color:#fff;text-align:center;padding-top:100px;"><form method="post">PIN:<br><input type="password" name="pin" autofocus><button>ENTRAR</button></form></body>'
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))

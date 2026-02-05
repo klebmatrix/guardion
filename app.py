@@ -5,21 +5,21 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
-from eth_account import Account
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- CONFIGS ---
-WALLET = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
-# Tratamento da chave: remove espaços e garante formato hexadecimal
-RAW_KEY = os.getenv("private_key", "").strip()
-if RAW_KEY and not RAW_KEY.startswith("0x"):
-    RAW_KEY = "0x" + RAW_KEY
+# --- CONFIGURAÇÕES DA CARTEIRA NOVA ---
+WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
+# Garante que a chave privada carregue sem erros de formato
+PRIV_KEY = os.getenv("private_key", "").strip()
+if PRIV_KEY and not PRIV_KEY.startswith("0x"):
+    PRIV_KEY = "0x" + PRIV_KEY
 
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 
+# RPC de alta disponibilidade
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
@@ -33,39 +33,53 @@ def registrar_log(msg, lado="SCAN", res="OK"):
         if os.path.exists("logs.json"):
             with open("logs.json", "r") as f: dados = json.load(f)
         dados.insert(0, {"data": agora, "mercado": msg, "lado": lado, "resultado": res})
-        with open("logs.json", "w") as f: json.dump(dados[:12], f)
+        with open("logs.json", "w") as f: json.dump(dados[:15], f)
     except: pass
 
-# --- FUNÇÃO DE TIRO CORRIGIDA ---
-async def executa_compra_bruta(token_id, title):
+# --- FUNÇÃO MANUAL: DESTRAVAR USDC ---
+@app.post("/destravar")
+async def destravar():
     try:
-        if not RAW_KEY:
-            registrar_log("Chave Ausente", "ERRO", "FALHA")
-            return False
+        registrar_log("Solicitando Approve...", "WEB3", "WAIT")
+        # ABI mínima para aprovação
+        abi = [{"constant":False,"inputs":[{"name":"_s","type":"address"},{"name":"_v","type":"uint256"}],"name":"approve","outputs":[{"name":"success","type":"bool"}],"type":"function"}]
+        contrato = w3.eth.contract(address=w3.to_checksum_address(USDC_CONTRACT), abi=abi)
+        
+        tx = contrato.functions.approve(w3.to_checksum_address(EXCHANGE_ADDR), 2**256-1).build_transaction({
+            'from': WALLET,
+            'nonce': w3.eth.get_transaction_count(WALLET),
+            'gas': 100000,
+            'gasPrice': int(w3.eth.gas_price * 1.5) # Prioridade alta
+        })
+        
+        signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        registrar_log(f"HASH: {tx_hash.hex()[:6]}", "BLOCKCHAIN", "LIBERADO ✅")
+    except Exception as e:
+        registrar_log("Falha no Approve", "ERRO", "FALHA")
+    return RedirectResponse(url="/dashboard", status_code=303)
 
-        nonce = w3.eth.get_transaction_count(WALLET)
+# --- FUNÇÃO DE TIRO (COMPRA) ---
+async def executa_compra(token_id, title):
+    try:
+        # Buy Selector da Polymarket + ID do Token
         tx_data = "0x4b665675" + token_id.replace('0x','').zfill(64)
         
         tx = {
-            'nonce': nonce,
+            'nonce': w3.eth.get_transaction_count(WALLET),
             'to': w3.to_checksum_address(EXCHANGE_ADDR),
             'value': 0,
             'gas': 500000,
-            'maxFeePerGas': w3.to_wei('200', 'gwei'),
-            'maxPriorityFeePerGas': w3.to_wei('50', 'gwei'),
+            'gasPrice': int(w3.eth.gas_price * 1.4),
             'data': tx_data,
             'chainId': 137
         }
-
-        # Método de assinatura mais robusto
-        signed_tx = w3.eth.account.sign_transaction(tx, RAW_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction) # Use raw_transaction (snake_case)
         
-        registrar_log(f"TIRO DADO: {title[:10]}", "BLOCKCHAIN", "SUCESSO 🔥")
+        signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        registrar_log(f"ORDEM: {title[:10]}", "BLOCKCHAIN", "SUCESSO 🔥")
         return True
-    except Exception as e:
-        registrar_log(f"Erro: {str(e)[:15]}", "WEB3", "FALHA")
-        print(f"ERRO DETALHADO: {e}")
+    except:
         return False
 
 # --- MOTOR SNIPER ---
@@ -76,18 +90,16 @@ async def sniper_loop():
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     res = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=15&sort=volume:desc")
                     if res.status_code == 200:
-                        mercados = res.json()
-                        for m in mercados:
+                        for m in res.json():
                             title = str(m.get('title', '')).upper()
                             m_id = m.get('id', '')
                             if any(p in title for p in bot_config["alvos"]) and m_id not in comprados:
-                                if await executa_compra_bruta(m_id, title):
+                                if await executa_compra(m_id, title):
                                     comprados.add(m_id)
                                     break
                         else:
                             registrar_log("Buscando Alvos", "SCAN", "FAST")
-            except Exception as e:
-                pass
+            except: pass
         await asyncio.sleep(20)
 
 @app.on_event("startup")
@@ -96,9 +108,10 @@ async def startup_event():
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS ---
+# --- ROTAS INTERFACE ---
 @app.get("/", response_class=HTMLResponse)
-async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
+async def login(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/entrar")
 async def validar(pin: str = Form(...)):
@@ -108,7 +121,7 @@ async def validar(pin: str = Form(...)):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    pol, usdc = 0.0, 0.0
+    pol, usdc = 0, 0
     try:
         pol = round(w3.from_wei(w3.eth.get_balance(WALLET), 'ether'), 4)
         abi_u = '[{"constant":true,"inputs":[{"name":"_o","type":"address"}],"name":"balanceOf","outputs":[{"name":"b","type":"uint256"}],"type":"function"}]'

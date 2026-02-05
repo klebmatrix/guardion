@@ -10,6 +10,7 @@ WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 LOGS_FILE = "movimentacoes.json"
 
+# Cache para não travar a tela
 cache = {"pol": "0.0000", "usdc": "0.00"}
 
 def registrar(acao, mkt, st, val="-"):
@@ -22,39 +23,45 @@ def registrar(acao, mkt, st, val="-"):
     logs.insert(0, {"hora": agora, "acao": acao, "mkt": mkt, "st": st, "val": val})
     with open(LOGS_FILE, "w") as f: json.dump(logs[:12], f)
 
-# --- MOTOR DE BUSCA VIA API (NÃO BLOQUEIA) ---
-def motor_api():
+# --- MOTOR DE RESGATE DE SALDO ---
+def motor_resgate():
+    # RPC da Cloudflare (Geralmente não bloqueia o Render)
+    rpc_url = "https://polygon-rpc.com"
+    
     while True:
         try:
-            # 1. Busca POL (Nativo) - Usando API Pública do Polygonscan
-            # Se você tiver uma API Key, coloque-a no final: &apikey=SUA_CHAVE
-            url_pol = f"https://api.polygonscan.com/api?module=account&action=balance&address={WALLET}&tag=latest"
-            r1 = requests.get(url_pol, timeout=10).json()
-            if r1.get('status') == '1':
-                cache["pol"] = f"{int(r1['result']) / 10**18:.4f}"
+            # Busca POL (O seu 4.1284)
+            payload_pol = {"jsonrpc":"2.0","method":"eth_getBalance","params":[WALLET, "latest"],"id":1}
+            r1 = requests.post(rpc_url, json=payload_pol, timeout=10).json()
+            if 'result' in r1:
+                saldo_pol = int(r1['result'], 16) / 10**18
+                cache["pol"] = f"{saldo_pol:.4f}"
 
-            # 2. Busca USDC (Token)
-            url_usdc = f"https://api.polygonscan.com/api?module=account&action=tokenbalance&contractaddress={USDC_CONTRACT}&address={WALLET}&tag=latest"
-            r2 = requests.get(url_usdc, timeout=10).json()
-            if r2.get('status') == '1':
-                cache["usdc"] = f"{int(r2['result']) / 10**6:.2f}"
+            # Busca USDC (Banca)
+            # 0x70a08231 é o seletor para 'balanceOf(address)'
+            data_hex = "0x70a08231000000000000000000000000" + WALLET[2:]
+            payload_usdc = {"jsonrpc":"2.0","method":"eth_call","params":[{"to":USDC_CONTRACT,"data":data_hex},"latest"],"id":1}
+            r2 = requests.post(rpc_url, json=payload_usdc, timeout=10).json()
+            if 'result' in r2:
+                saldo_usdc = int(r2['result'], 16) / 10**6
+                cache["usdc"] = f"{saldo_usdc:.2f}"
             
-            registrar("SCAN", "POLYGON", "CONECTADO", "LIVE")
+            registrar("SCAN", "REDE", "SINCRO", "OK")
         except:
-            registrar("ERRO", "CONEXÃO", "RETRY", "FAIL")
+            registrar("SCAN", "REDE", "ERRO", "BUSCANDO")
         
         time.sleep(20)
 
-threading.Thread(target=motor_api, daemon=True).start()
+threading.Thread(target=motor_resgate, daemon=True).start()
 
-# --- INTERFACE ---
+# --- LOGIN ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if not PIN_SISTEMA: return "ERRO: Defina 'guardiao' no Render."
+    if not PIN_SISTEMA: return "ERRO: Variavel 'guardiao' no Render vazia."
     if request.method == 'POST' and request.form.get('pin') == PIN_SISTEMA:
         session['auth'] = True
         return redirect(url_for('dash'))
-    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>LOGIN SNIPER</h1><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
+    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>🛡️ ACESSO SNIPER</h1><form method="post"><input type="password" name="pin" autofocus><br><br><button type="submit">ENTRAR</button></form></body>'
 
 @app.route('/')
 def dash():
@@ -70,20 +77,20 @@ def dash():
 
     return f"""
     <body style="background:#050505; color:#eee; font-family:monospace; padding:20px;">
-        <div style="max-width:750px; margin:auto; border:1px solid #333; padding:20px; background:#000;">
-            <div style="display:flex; justify-content:space-between; border-bottom:2px solid orange; padding-bottom:10px; margin-bottom:20px;">
-                <h2 style="color:orange; margin:0;">🛡️ SNIPER TERMINAL v25</h2>
+        <div style="max-width:700px; margin:auto; border:1px solid #444; padding:20px; background:#000;">
+            <div style="display:flex; justify-content:space-between; border-bottom:2px solid orange; padding-bottom:10px;">
+                <h2 style="color:orange; margin:0;">⚡ SNIPER TERMINAL v26</h2>
                 <div style="text-align:right;">
-                    <div>POL: <b style="color:cyan;">{cache['pol']}</b></div>
-                    <div>USDC: <b style="color:lime;">{cache['usdc']}</b></div>
+                    <div>POL (TAXA): <b style="color:cyan;">{cache['pol']}</b></div>
+                    <div>USDC (BANCA): <b style="color:lime;">{cache['usdc']}</b></div>
                 </div>
             </div>
-            <table style="width:100%; text-align:left; border-collapse:collapse;">
-                <tr style="color:#555; border-bottom:1px solid #444;"><th>HORA</th><th>MERCADO</th><th>STATUS</th><th>VALOR</th></tr>
+            <table style="width:100%; text-align:left; margin-top:20px;">
+                <tr style="color:#555;"><th>HORA</th><th>ALVO</th><th>STATUS</th><th>VALOR</th></tr>
                 {rows}
             </table>
         </div>
-        <script>setTimeout(()=>location.reload(), 15000);</script>
+        <script>setTimeout(()=>location.reload(), 10000);</script>
     </body>"""
 
 if __name__ == "__main__":

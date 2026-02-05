@@ -1,103 +1,84 @@
 import os, asyncio, json, uvicorn, httpx
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from web3 import Web3
-from web3.middleware import ExtraDataToPOAMiddleware
 
 app = FastAPI()
 
-# Tenta carregar a pasta de templates, se não existir, o bot não trava
-try:
-    templates = Jinja2Templates(directory="templates")
-except:
-    templates = None
+# Força a criação da pasta templates se você esqueceu
+if not os.path.exists("templates"):
+    os.makedirs("templates")
 
-# --- CONEXÃO ---
+templates = Jinja2Templates(directory="templates")
+
+# --- DADOS ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PRIV_KEY = os.getenv("private_key", "").strip()
 if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
 
 USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
-
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-bot_config = {
-    "status": "OFF",
-    "min_price": 0.10, "max_price": 0.88,
-    "min_odds": 1.15, "max_odds": 1.95,
-    "min_volume": 2000
-}
+bot_config = {"status": "OFF", "min_price": 0.10, "max_price": 0.88}
 
-def registrar_log(msg, lado="RADAR", res="OK"):
+def registrar_log(msg):
     try:
         agora = datetime.now().strftime("%H:%M:%S")
         dados = []
         if os.path.exists("logs.json"):
             with open("logs.json", "r") as f: dados = json.load(f)
-        dados.insert(0, {"data": agora, "mercado": msg, "lado": lado, "resultado": res})
-        with open("logs.json", "w") as f: json.dump(dados[:30], f)
+        dados.insert(0, {"data": agora, "mercado": msg, "lado": "RADAR", "resultado": "ON"})
+        with open("logs.json", "w") as f: json.dump(dados[:20], f)
     except: pass
 
-# --- MOTOR DUAL ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # Busca Polymarket
-                try:
-                    res_p = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=15&sort=volume:desc")
-                    if res_p.status_code == 200:
-                        registrar_log("Varrendo Polymarket...", "SISTEMA", "SCAN")
-                except: pass
-                # Busca DexSport
-                try:
-                    res_s = await client.get("https://api.dexsport.io/v1/events/active?chainId=137")
-                    if res_s.status_code == 200:
-                        registrar_log("Varrendo Esportes...", "SISTEMA", "SCAN")
-                except: pass
+            try:
+                async with httpx.AsyncClient() as client:
+                    # Tenta Polymarket
+                    await client.get("https://gamma-api.polymarket.com/events?active=true&limit=10")
+                    registrar_log("Vigiando Polymarket...")
+                    # Tenta Esportes
+                    await client.get("https://api.dexsport.io/v1/events/active?chainId=137")
+                    registrar_log("Vigiando Esportes...")
+            except: pass
         await asyncio.sleep(20)
 
 @app.on_event("startup")
-async def startup_event():
+async def startup():
     if not os.path.exists("logs.json"):
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- ROTAS DE SEGURANÇA (Para evitar o Not Found) ---
+# --- ROTAS (Onde o erro 'Not Found' morre) ---
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    if not templates:
-        return "<h1>Servidor ON</h1><p>Pasta 'templates' nao encontrada no GitHub.</p>"
+async def index(request: Request):
     try:
         return templates.TemplateResponse("login.html", {"request": request})
     except:
-        return "<h1>Erro de Template</h1><p>Crie a pasta 'templates' com o arquivo login.html</p>"
+        return "<h1>ERRO: Faltam os arquivos na pasta templates!</h1><p>Crie login.html e dashboard.html no GitHub.</p>"
 
 @app.post("/entrar")
-async def validar(pin: str = Form(...)):
-    if pin.strip() == str(os.getenv("guardiao", "20262026")).strip():
+async def entrar(pin: str = Form(...)):
+    if pin == os.getenv("guardiao", "20262026"):
         return RedirectResponse(url="/dashboard", status_code=303)
-    return "PIN INCORRETO"
+    return "PIN ERRADO"
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    if not templates: return "Erro: Sem Templates"
+async def dash(request: Request):
     logs = []
     if os.path.exists("logs.json"):
         with open("logs.json", "r") as f: logs = json.load(f)
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "wallet": WALLET, "pol": 0, "usdc": 0, "bot": bot_config, "historico": logs
-    })
+    return templates.TemplateResponse("dashboard.html", {"request": request, "wallet": WALLET, "bot": bot_config, "historico": logs, "pol": 0, "usdc": 0})
 
-@app.get("/status")
-async def status_simples():
-    return {"status": "online", "bot": bot_config["status"]}
+@app.post("/toggle_bot")
+async def toggle(status: str = Form(...)):
+    bot_config["status"] = status
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

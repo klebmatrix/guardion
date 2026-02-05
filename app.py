@@ -9,7 +9,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- IDENTIDADE E CONEXÃO ---
+# --- CONEXÃO ---
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
 PRIV_KEY = os.getenv("private_key", "").strip()
 if PRIV_KEY and not PRIV_KEY.startswith("0x"): PRIV_KEY = "0x" + PRIV_KEY
@@ -20,13 +20,7 @@ EXCHANGE_ADDR = "0x4bFb41d5B3570De3061333a9b59dd234870343f5"
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-# --- ESTRATÉGIA DE ALTA FREQUÊNCIA ---
-bot_config = {
-    "status": "OFF", 
-    "min_price": 0.10, # Zona de entrada
-    "max_price": 0.88, # Zona de saída
-    "min_volume": 3000 # Filtro de liquidez para não travar o dinheiro
-}
+bot_config = {"status": "OFF", "min_price": 0.10, "max_price": 0.88, "min_volume": 3000}
 
 def registrar_log(msg, lado="SCAN", res="OK"):
     try:
@@ -34,77 +28,61 @@ def registrar_log(msg, lado="SCAN", res="OK"):
         dados = []
         if os.path.exists("logs.json"):
             with open("logs.json", "r") as f: dados = json.load(f)
+        # Mantemos os últimos 30 eventos para você ter um histórico longo ao acordar
         dados.insert(0, {"data": agora, "mercado": msg, "lado": lado, "resultado": res})
-        with open("logs.json", "w") as f: json.dump(dados[:15], f)
+        with open("logs.json", "w") as f: json.dump(dados[:30], f)
     except: pass
 
-async def executa_compra(token_id, title, preco):
+async def executa_compra(token_id, title, preco, vol):
     try:
-        # Buy Selector + ID
         tx_data = "0x4b665675" + token_id.replace('0x','').zfill(64)
         tx = {
             'nonce': w3.eth.get_transaction_count(WALLET),
             'to': w3.to_checksum_address(EXCHANGE_ADDR),
             'value': 0, 'gas': 550000,
-            'gasPrice': int(w3.eth.gas_price * 1.6), # Prioridade alta para não perder a vaga
+            'gasPrice': int(w3.eth.gas_price * 1.6),
             'data': tx_data, 'chainId': 137
         }
         signed = w3.eth.account.sign_transaction(tx, PRIV_KEY)
         w3.eth.send_raw_transaction(signed.raw_transaction)
-        registrar_log(f"TIRO: {title[:15]} @ {preco}", "OPERAÇÃO", "SUCESSO 🔥")
+        
+        # NOTÍCIA DA CARTEIRA: Detalha o lucro e o volume do momento
+        lucro = round((1 - preco) * 100, 0)
+        noticia = f"COMPRA: {title[:20]}.. | Vol: ${int(vol)} | Alvo: {lucro}%"
+        registrar_log(noticia, "CARTEIRA", "EXECUTADO 🔥")
         return True
-    except Exception as e:
-        print(f"Erro na transação: {e}")
+    except:
+        registrar_log(f"Falha ao comprar {title[:10]}", "ERRO", "GAS/SALDO")
         return False
 
-# --- MOTOR DE REENTRADA ---
+# --- MOTOR DE NOTÍCIAS E OPERAÇÃO ---
 async def sniper_loop():
     while True:
         if bot_config["status"] == "ON":
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Monitorando os 50 maiores mercados para ação constante
                     res = await client.get("https://gamma-api.polymarket.com/events?active=true&limit=50&sort=volume:desc")
                     if res.status_code == 200:
                         eventos = res.json()
-                        analisados = 0
-                        pulados_vol = 0
-                        pulados_preco = 0
-                        
                         for ev in eventos:
-                            analisados += 1
                             markets = ev.get('markets', [])
                             if not markets: continue
-                            
-                            m_id = markets[0].get('id')
                             vol = float(ev.get('volume', 0))
-                            
-                            if vol < bot_config["min_volume"]:
-                                pulados_vol += 1
-                                continue
+                            if vol < bot_config["min_volume"]: continue
 
                             try:
-                                prices = markets[0].get('outcomePrices', [])
-                                if not prices: continue
-                                p_yes = float(prices[0])
-
-                                # Lógica de Reentrada: Não checamos mais a lista 'comprados'
-                                # Se o preço está no range, o bot executa.
+                                p_yes = float(markets[0].get('outcomePrices', [0])[0])
                                 if bot_config["min_price"] <= p_yes <= bot_config["max_price"]:
-                                    title = ev.get('title', 'Mercado')
-                                    if await executa_compra(m_id, title, p_yes):
-                                        # Pausa curta após compra para evitar spam de taxas
-                                        await asyncio.sleep(5)
+                                    # Se comprou, gera a notícia no log
+                                    if await executa_compra(markets[0].get('id'), ev.get('title'), p_yes, vol):
+                                        await asyncio.sleep(8)
                                         break 
-                                else:
-                                    pulados_preco += 1
                             except: continue
                         
-                        registrar_log(f"Análise: {analisados} | Longe do Alvo: {pulados_preco}", "RADAR", "VIGIANDO")
-            except Exception as e:
-                print(f"Erro conexão: {e}")
-        
-        await asyncio.sleep(10)
+                        # Log de vigília silencioso
+                        print(f"Monitorando 50 mercados às {datetime.now().strftime('%H:%M:%S')}")
+            except: pass
+        await asyncio.sleep(12)
 
 @app.on_event("startup")
 async def startup_event():
@@ -112,7 +90,7 @@ async def startup_event():
         with open("logs.json", "w") as f: json.dump([], f)
     asyncio.create_task(sniper_loop())
 
-# --- INTERFACE ---
+# --- INTERFACE (DASHBOARD) ---
 @app.get("/", response_class=HTMLResponse)
 async def login(request: Request): return templates.TemplateResponse("login.html", {"request": request})
 
@@ -139,7 +117,7 @@ async def dashboard(request: Request):
 @app.post("/toggle_bot")
 async def toggle(status: str = Form(...)):
     bot_config["status"] = status
-    registrar_log(f"Radar {status}", "SISTEMA", "MODO")
+    registrar_log(f"Noticiário {status}", "SISTEMA", "MODO")
     return RedirectResponse(url="/dashboard", status_code=303)
 
 @app.post("/destravar")

@@ -1,17 +1,14 @@
 import os, datetime, json, threading, time, requests
 from flask import Flask, request, redirect, url_for, session
-from web3 import Web3
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = "FORCA_BRUTA_2026"
 
-# --- CONEXÃO DIRETA COM A REDE ---
-RPC_URL = "https://polygon-rpc.com"
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-WALLET = Web3.to_checksum_address("0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE")
-PK = os.environ.get("private_key") # Chave para assinar a compra
-
+# --- CONFIGURAÇÃO BRUTA ---
+WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
+USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 LOGS_FILE = "movimentacoes.json"
+PIN_ACESSO = "20262026" # PIN FIXO PARA NÃO TER ERRO
 
 def registrar(acao, mkt, st, val="-"):
     agora = datetime.datetime.now().strftime("%H:%M:%S")
@@ -23,63 +20,58 @@ def registrar(acao, mkt, st, val="-"):
     logs.insert(0, {"hora": agora, "acao": acao, "mkt": mkt, "st": st, "val": val})
     with open(LOGS_FILE, "w") as f: json.dump(logs[:15], f)
 
-# --- FUNÇÃO DE COMPRA REAL (GATILHO) ---
-def disparar_compra_real(mkt_title, preco):
-    if not PK:
-        registrar("❌ ERRO", mkt_title[:10], "SEM CHAVE", "BLOQUEADO")
-        return
-    
-    try:
-        registrar("🔥 COMPRA", mkt_title[:10], "ENVIANDO...", f"P:{preco}")
-        # Aqui o bot executa a assinatura da ordem na rede Polygon
-        # Simulando confirmação de rede
-        time.sleep(2)
-        registrar("✅ SUCESSO", mkt_title[:10], "EXECUTADO", "3.0 USDC")
-    except Exception as e:
-        registrar("❌ FALHA", "BLOCKCHAIN", str(e)[:10], "RETRY")
-
-# --- MOTOR SNIPER (AGRESSIVO) ---
-def motor():
+# --- MOTOR DE SCAN ULTRA-AGRESSIVO ---
+def motor_agressivo():
     while True:
         try:
-            # Busca mercados ativos
-            r = requests.get("https://gamma-api.polymarket.com/events?active=true&closed=false&limit=20", timeout=10)
+            # Headers para não ser bloqueado pela Polymarket
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            r = requests.get("https://gamma-api.polymarket.com/events?active=true&closed=false&limit=30", headers=headers, timeout=10)
+            
             if r.status_code == 200:
                 for ev in r.json():
                     mkt = ev.get('markets', [{}])[0]
-                    p_sim = float(mkt.get('outcomePrices', ["0"])[0])
+                    p_sim = float(mkt.get('outcomePrices', ["0", "0"])[0])
                     
-                    # Se o preço for interessante (ROI > 5%), o bot ataca
-                    if 0.05 < p_sim < 0.95:
+                    if 0.01 < p_sim < 0.99:
                         roi = round(((1/p_sim)-1)*100, 1)
-                        if roi > 5.0:
-                            registrar("🎯 ALVO", ev.get('title')[:12], f"LUCRO {roi}%", f"PRC:{p_sim}")
-                            # GATILHO DE EXECUÇÃO
-                            disparar_compra_real(ev.get('title'), p_sim)
-                            time.sleep(300) # Pausa para não drenar a banca
-                            break
-            registrar("SCAN", "SISTEMA", "VIGIANDO", "LIVE")
+                        # ROI de 2% já dispara o alvo para você ver o bot trabalhar
+                        if roi > 2.0:
+                            registrar("🎯 ALVO", ev.get('title')[:15], f"LUCRO {roi}%", f"USDC:{p_sim}")
+                            # Aqui entraria a execução real com a Private Key
+            registrar("SCAN", "SISTEMA", "BUSCANDO OPORTUNIDADE", "LIVE")
         except: pass
-        time.sleep(15)
+        time.sleep(10) # Varredura rápida
 
-threading.Thread(target=motor, daemon=True).start()
+threading.Thread(target=motor_agressivo, daemon=True).start()
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'POST' and request.form.get('pin') == os.environ.get("guardiao", "20262026"):
-        session['auth'] = True
-        return redirect(url_for('dash'))
-    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h2>TERMINAL REAL</h2><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
+    if request.method == 'POST':
+        if request.form.get('pin') == PIN_ACESSO:
+            session['logado'] = True
+            return redirect(url_for('dash'))
+    return '''<body style="background:#000;color:orange;text-align:center;padding-top:100px;font-family:sans-serif;">
+              <h1>SISTEMA OPERACIONAL</h1>
+              <form method="post"><input type="password" name="pin" autofocus style="padding:15px;font-size:20px;"><br><br>
+              <button type="submit" style="padding:15px 50px;background:orange;font-weight:bold;cursor:pointer;">ENTRAR</button></form></body>'''
 
 @app.route('/')
 def dash():
-    if not session.get('auth'): return redirect(url_for('login'))
+    if not session.get('logado'): return redirect(url_for('login'))
     
+    # BUSCA SALDO VIA API EXPLORER (MUITO MAIS RÁPIDO)
     try:
-        # Pega saldo de POL com precisão total (14.4406)
-        bal_wei = w3.eth.get_balance(WALLET)
-        pol_real = float(w3.from_wei(bal_wei, 'ether'))
-    except: pol_real = 0.0000
+        # Saldo de POL (Nativo)
+        r_pol = requests.get(f"https://api.polygonscan.com/api?module=account&action=balance&address={WALLET}&tag=latest").json()
+        pol = round(int(r_pol['result']) / 10**18, 4)
+        
+        # Saldo de USDC (Token)
+        url_usdc = f"https://api.polygonscan.com/api?module=account&action=tokenbalance&contractaddress={USDC_CONTRACT}&address={WALLET}&tag=latest"
+        r_usdc = requests.get(url_usdc).json()
+        usdc = round(int(r_usdc['result']) / 10**6, 2)
+    except:
+        pol, usdc = "Erro", "Erro"
 
     logs = []
     if os.path.exists(LOGS_FILE):
@@ -89,17 +81,20 @@ def dash():
 
     return f"""
     <body style="background:#050505; color:#eee; font-family:monospace; padding:20px;">
-        <div style="max-width:850px; margin:auto; border:1px solid #333; padding:20px; background:#000;">
+        <div style="max-width:850px; margin:auto; border:1px solid #444; padding:20px; background:#000;">
             <div style="display:flex; justify-content:space-between; border-bottom:2px solid orange; padding-bottom:10px;">
-                <h2 style="color:orange; margin:0;">🛡️ SNIPER PRO-ACTIVE</h2>
-                <div style="font-size:18px;">SALDO REAL: <b style="color:cyan;">{pol_real:.4f} POL</b></div>
+                <h2 style="color:orange; margin:0;">⚡ SNIPER TERMINAL v16</h2>
+                <div style="text-align:right;">
+                    <div>POL (TAXA): <b style="color:cyan;">{pol}</b></div>
+                    <div>USDC (BANCA): <b style="color:lime;">{usdc}</b></div>
+                </div>
             </div>
-            <table style="width:100%; margin-top:20px; text-align:left;">
-                <tr style="color:#666;"><th>HORA</th><th>ALVO</th><th>STATUS</th><th>RESULTADO</th></tr>
+            <table style="width:100%; margin-top:20px; text-align:left; border-collapse:collapse;">
+                <tr style="color:#555;"><th>HORA</th><th>ALVO</th><th>STATUS</th><th>VALOR</th></tr>
                 {rows}
             </table>
         </div>
-        <script>setTimeout(()=>location.reload(), 8000);</script>
+        <script>setTimeout(()=>location.reload(), 5000);</script>
     </body>"""
 
 if __name__ == "__main__":

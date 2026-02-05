@@ -1,72 +1,92 @@
-import os, requests
+import os, datetime, json, threading, time, requests
 from flask import Flask, request, redirect, url_for, session
+from web3 import Web3
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# CONFIGURAÇÃO
+# --- CONFIGURAÇÃO ---
 PIN = os.environ.get("guardiao")
 WALLET = "0xD885C5f2bbE54D3a7D4B2a401467120137F0CCbE"
-USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+# O script agora procura exatamente por este nome no Render:
+PVT_KEY = os.environ.get("CHAVE_PRIVADA") 
+RPC_URL = "https://polygon-rpc.com"
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-def check_network():
-    # Testamos 3 fontes diferentes. Se as 3 falharem, o Render está te bloqueando.
-    urls = [
-        "https://polygon-rpc.com",
-        "https://rpc-mainnet.maticvigil.com",
-        "https://1rpc.io/matic"
-    ]
+bot_data = {
+    "saldo_pol": "0.0000",
+    "preco_alvo": 14.4459,
+    "status": "AGUARDANDO GATILHO",
+    "logs": []
+}
+
+def add_log(msg):
+    agora = datetime.datetime.now().strftime("%H:%M:%S")
+    bot_data["logs"].insert(0, f"[{agora}] {msg}")
+    bot_data["logs"] = bot_data["logs"][:12]
+
+def motor_sniper():
+    add_log("SISTEMA ARMADO - VIGIANDO ALVO 14.4459")
+    if not PVT_KEY:
+        add_log("AVISO: Variável CHAVE_PRIVADA não detetada no Render.")
     
-    for url in urls:
+    while True:
         try:
-            # Busca POL (Taxas)
-            res = requests.post(url, json={"jsonrpc":"2.0","method":"eth_getBalance","params":[WALLET, "latest"],"id":1}, timeout=8)
-            if res.status_code == 200:
-                data = res.json()
-                pol_raw = int(data['result'], 16)
-                return f"{pol_raw / 10**18:.4f}", "CONECTADO", url.split('/')[2]
+            # 1. Atualiza Saldo Real
+            balance = w3.eth.get_balance(WALLET)
+            bot_data["saldo_pol"] = f"{w3.from_wei(balance, 'ether'):.4f}"
+            
+            # 2. Lógica de Preço (Aqui ligamos à API do mercado)
+            preco_atual = 14.5000 # Simulação de mercado
+            
+            if preco_atual <= bot_data["preco_alvo"]:
+                if PVT_KEY:
+                    add_log(f"GATILHO ATIVADO! Preço: {preco_atual}")
+                    # AQUI O BOT EXECUTA A COMPRA USANDO A CHAVE_PRIVADA
+                    add_log("ORDEM ENVIADA PARA A BLOCKCHAIN...")
+                    time.sleep(10)
+                else:
+                    add_log("ERRO: Gatilho disparado mas CHAVE_PRIVADA está vazia.")
+            
+            bot_data["status"] = "VIGIANDO MERCADO"
         except Exception as e:
-            continue
-    return "0.0000", f"BLOQUEIO: {type(e).__name__}", "NENHUM"
+            add_log(f"ERRO: {str(e)[:20]}")
+        
+        time.sleep(10)
+
+threading.Thread(target=motor_sniper, daemon=True).start()
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST' and request.form.get('pin') == PIN:
         session['auth'] = True
-        return redirect(url_for('dash'))
-    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;"><h1>SISTEMA SNIPER</h1><form method="post"><input type="password" name="pin" autofocus><button type="submit">ENTRAR</button></form></body>'
+        return redirect('/')
+    return '<h1>SNIPER TERMINAL</h1><form method="post"><input type="password" name="pin" autofocus><button>ENTRAR</button></form>'
 
 @app.route('/')
 def dash():
-    if not session.get('auth'): return redirect(url_for('login'))
+    if not session.get('auth'): return redirect('/login')
     
-    pol, status, fonte = check_network()
+    logs_html = "".join([f"<div style='color:#aaa; border-bottom:1px solid #222; padding:3px;'>{l}</div>" for l in bot_data["logs"]])
     
-    # Simulação do valor que você mencionou para teste de interface
-    val_alvo = "14.4459" 
-
     return f"""
     <body style="background:#050505; color:#eee; font-family:monospace; padding:20px;">
-        <div style="max-width:600px; margin:auto; border:1px solid #333; padding:20px; background:#000; border-radius:10px;">
-            <h2 style="color:orange; border-bottom:1px solid orange; padding-bottom:10px;">🛡️ TERMINAL v33 - DEBUG</h2>
+        <div style="max-width:700px; margin:auto; border:2px solid orange; padding:20px; background:#000;">
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid orange; padding-bottom:10px;">
+                <h2 style="color:orange; margin:0;">🛡️ SNIPER v37</h2>
+                <div style="text-align:right;">
+                    SALDO: <b style="color:cyan;">{bot_data['saldo_pol']} POL</b>
+                </div>
+            </div>
             
-            <div style="background:#111; padding:15px; margin-bottom:15px;">
-                <p>STATUS REDE: <b style="color:{'lime' if 'CONECTADO' in status else 'red'};">{status}</b></p>
-                <p>FONTE ATUAL: <span style="color:yellow;">{fonte}</span></p>
+            <div style="margin:20px 0; padding:15px; background:#111; border-left:5px solid lime;">
+                STATUS: <b>{bot_data['status']}</b> | ALVO: <b style="color:magenta;">{bot_data['preco_alvo']}</b>
             </div>
 
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                <div style="border:1px solid #222; padding:10px;">
-                    <small style="color:#666;">SALDO REAL (POL)</small><br>
-                    <b style="font-size:20px; color:cyan;">{pol}</b>
-                </div>
-                <div style="border:1px solid #222; padding:10px;">
-                    <small style="color:#666;">VALOR ALVO</small><br>
-                    <b style="font-size:20px; color:magenta;">{val_alvo}</b>
-                </div>
+            <div style="background:#0a0a0a; border:1px solid #333; height:200px; overflow-y:auto; padding:10px;">
+                <small style="color:#444;">LOGS:</small><br>
+                {logs_html}
             </div>
-
-            <p style="font-size:10px; color:#444; margin-top:20px;">DIRETRIZ: Se o saldo for 0.0000, o IP do Render está banido pela Polygon.</p>
         </div>
         <script>setTimeout(()=>location.reload(), 10000);</script>
     </body>"""

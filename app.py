@@ -1,171 +1,133 @@
-import os, datetime, json, threading, time, random
-from flask import Flask, request, redirect, url_for, session
+import os, datetime, json, threading, time
+from flask import Flask, request, redirect, url_for, session, make_response
 from web3 import Web3
+from eth_account import Account
+from fpdf import FPDF
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET", "ultra_stable_2026_pro")
+app.secret_key = os.environ.get("FLASK_SECRET", "omni_iq_report_2026")
 
-# --- LISTA DE SEGURANÇA (RPC FAILOVER) ---
-RPC_LIST = [
-    "https://polygon-rpc.com",
-    "https://rpc-mainnet.maticvigil.com",
-    "https://polygon.llamarpc.com",
-    "https://1rpc.io/matic"
-]
+# --- CONFIGS E TOKENS ---
+RPC_LIST = ["https://polygon-rpc.com", "https://polygon.llamarpc.com"]
+WBTC_CONTRACT = "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
+USDC_CONTRACT = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+ERC20_ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-def get_stable_web3():
-    """Tenta conectar em vários nós até encontrar um ativo"""
+def get_w3():
     for url in RPC_LIST:
         try:
-            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 8}))
-            if w3.is_connected(): return w3
+            w = Web3(Web3.HTTPProvider(url))
+            if w.is_connected(): return w
         except: continue
     return None
 
-CARTEIRA_ALVO = "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"
+def get_token_balance(w3, token_address, wallet_address):
+    try:
+        contract = w3.eth.contract(address=w3.to_checksum_address(token_address), abi=json.loads(ERC20_ABI))
+        raw = contract.functions.balanceOf(wallet_address).call()
+        dec = contract.functions.decimals().call()
+        return raw / (10**dec)
+    except: return 0.0
+
 STATE_FILE = "bot_state.json"
 LOGS_FILE = "logs.json"
 
-# --- PERSISTÊNCIA DE DADOS ---
-def load_json(f, d):
-    if os.path.exists(f):
-        try:
-            with open(f, "r") as file: return json.load(file)
-        except: return d
-    return d
+# --- GERADOR DE RELATÓRIO PDF ---
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 15)
+        self.cell(0, 10, 'RELATORIO DE AUDITORIA - OMNI IQ', 0, 1, 'C')
+        self.ln(10)
 
-def save_json(f, d):
-    try:
-        with open(f, "w") as file: json.dump(d, file, indent=4)
-    except: pass
+@app.route('/relatorio')
+def relatorio():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    w3 = get_w3()
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font('Arial', '', 12)
+    
+    pdf.cell(0, 10, f"Data: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", 0, 1)
+    pdf.ln(5)
+    
+    for i in range(1, 6):
+        key = os.environ.get(f"KEY_MOD_{i}")
+        if key:
+            addr = w3.eth.account.from_key(key).address
+            pol = w3.eth.get_balance(addr) / 10**18
+            btc = get_token_balance(w3, WBTC_CONTRACT, addr)
+            usd = get_token_balance(w3, USDC_CONTRACT, addr)
+            
+            pdf.set_fill_color(240, 240, 240)
+            pdf.cell(0, 10, f"MODULO {i} - {addr}", 1, 1, 'L', True)
+            pdf.cell(0, 10, f"  POL: {pol:.4f} | BTC: {btc:.6f} | USD: {usd:.2f}", 1, 1)
+            pdf.ln(2)
 
-def registrar_log(msg, mod="SYS", res="OK"):
-    logs = load_json(LOGS_FILE, [])
-    logs.insert(0, {"data": datetime.datetime.now().strftime("%H:%M:%S"), "mod": mod, "msg": msg, "res": res})
-    save_json(LOGS_FILE, logs[:50])
+    response = make_response(pdf.output(dest='S').encode('latin-1'))
+    response.headers.set('Content-Type', 'application/pdf')
+    response.headers.set('Content-Disposition', 'attachment', filename='auditoria_omni.pdf')
+    return response
 
-# --- MOTOR DE EXECUÇÃO ---
-def efetivar_transacao(priv_key, nome_mod):
-    w3 = get_stable_web3()
-    if not w3:
-        registrar_log("Rede Instável (Sem RPC)", nome_mod, "ERRO")
-        return
+# --- DASHBOARD (INCLUINDO BOTÃO DE PDF) ---
+@app.route('/')
+def dashboard():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    w3 = get_w3()
+    mod_html = ""
+    for i in range(1, 6):
+        key = os.environ.get(f"KEY_MOD_{i}")
+        if key:
+            nome = f"MOD_0{i}"
+            addr = w3.eth.account.from_key(key).address
+            pol = w3.eth.get_balance(addr) / 10**18
+            btc = get_token_balance(w3, WBTC_CONTRACT, addr)
+            usd = get_token_balance(w3, USDC_CONTRACT, addr)
+            
+            mod_html += f"""
+            <div style="background:#161b22; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #30363d;">
+                <b>{nome}</b>
+                <div style="font-size:11px; color:#8b949e;">{addr}</div>
+                <div style="margin:10px 0; font-size:13px;">
+                    <span style="color:orange;">BTC: {btc:.6f}</span> | 
+                    <span style="color:cyan;">USD: {usd:.2f}</span> | 
+                    <span style="color:lime;">POL: {pol:.2f}</span>
+                </div>
+            </div>"""
 
-    try:
-        # Formatação da chave
-        pk = priv_key if priv_key.startswith('0x') else '0x' + priv_key
-        conta = w3.eth.account.from_key(pk)
-        
-        # Gestão de Gás (Prioridade 30% acima da rede)
-        gas_price = int(w3.eth.gas_price * 1.3)
-        balance = w3.eth.get_balance(conta.address)
-        
-        if balance < w3.to_wei(0.02, 'ether'):
-            registrar_log("Combustível Crítico", nome_mod, "AVISO")
-            return
+    return f"""
+    <body style="background:#0d1117; color:#c9d1d9; font-family:sans-serif; padding:20px;">
+        <div style="max-width:600px; margin:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="color:#58a6ff;">OMNI IQ v86.4</h2>
+                <a href="/relatorio" style="text-decoration:none; background:#30363d; color:white; padding:8px 15px; border-radius:5px; font-size:12px;">📄 BAIXAR PDF</a>
+            </div>
+            
+            <div style="background:#1c2128; padding:15px; border-radius:10px; border:1px dashed #58a6ff; margin:20px 0; text-align:center;">
+                <form action="/gerar" method="post">
+                    <input type="password" name="pin_int" placeholder="PIN INTERIOR" style="padding:5px;">
+                    <button style="background:#58a6ff; color:black; font-weight:bold; border:none; padding:6px 15px; border-radius:5px; cursor:pointer;">GERAR NOVO MÓDULO</button>
+                </form>
+                {f'<div style="background:#000; padding:10px; margin-top:10px; font-size:11px; color:lime; word-break:break-all;"><b>NOVA CARTEIRA:</b><br>ADDR: {session.pop("new_addr", "")}<br>KEY: {session.pop("new_key", "")}</div>' if "new_key" in session else ""}
+            </div>
 
-        tx = {
-            'nonce': w3.eth.get_transaction_count(conta.address),
-            'to': w3.to_checksum_address(CARTEIRA_ALVO),
-            'value': 0, 
-            'gas': 28000, 
-            'gasPrice': gas_price,
-            'chainId': 137
-        }
-        
-        signed = w3.eth.account.sign_transaction(tx, pk)
-        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
-        registrar_log(f"TX: {tx_hash.hex()[:8]}", nome_mod, "SUCESSO")
-        
-    except Exception as e:
-        registrar_log("Erro de Sincronia", nome_mod, "RE-TENTAR")
+            {mod_html}
+        </div>
+    </body>"""
 
-def loop_modulo(nome_mod, priv_key):
-    """Loop isolado para cada carteira"""
-    while True:
-        state = load_json(STATE_FILE, {})
-        if state.get(nome_mod) == "ON":
-            # Jitter: Evita que os 3 módulos disparem juntos
-            time.sleep(random.randint(2, 12)) 
-            efetivar_transacao(priv_key, nome_mod)
-            time.sleep(600) # Descanso de 10 min
-        time.sleep(15)
-
-# --- INICIALIZAÇÃO DOS MÓDULOS ---
-MODULOS_DETECTADOS = {}
-for i in range(1, 4): # Foco nos seus 3 módulos
-    key = os.environ.get(f"KEY_MOD_{i}")
-    if key:
-        nome = f"MOD_0{i}"
-        MODULOS_DETECTADOS[nome] = key
-        threading.Thread(target=loop_modulo, args=(nome, key), name=nome, daemon=True).start()
-
-# --- ROTAS DASHBOARD ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST' and request.form.get('pin') == os.environ.get("guardiao", "123456"):
         session['logged_in'] = True
         return redirect(url_for('dashboard'))
-    return '<body style="background:#0d1117;color:#58a6ff;text-align:center;padding-top:100px;font-family:sans-serif;">' \
-           '<form method="post"><h3>ACESSO OMNI v86.2</h3><input type="password" name="pin" autofocus style="padding:10px;border-radius:5px;border:1px solid #30363d;background:#010409;color:white;"></form></body>'
+    return '<body style="background:#000;color:cyan;text-align:center;padding:100px;"><h3>ACESSO IQ</h3><form method="post"><input type="password" name="pin" autofocus></form></body>'
 
-@app.route('/')
-def dashboard():
+@app.route('/gerar', methods=['POST'])
+def gerar():
     if not session.get('logged_in'): return redirect(url_for('login'))
-    state = load_json(STATE_FILE, {})
-    logs = load_json(LOGS_FILE, [])
-    
-    mod_html = ""
-    for nome in MODULOS_DETECTADOS.keys():
-        status = state.get(nome, "OFF")
-        cor = "#3fb950" if status == "ON" else "#f85149"
-        mod_html += f"""
-        <div style="background:#161b22; padding:15px; border-radius:10px; margin-bottom:10px; border:1px solid #30363d;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <b style="font-size:18px;">{nome}</b> <span style="color:{cor};">● {status}</span>
-            </div>
-            <form action="/toggle" method="post" style="margin-top:10px; display:flex; gap:10px;">
-                <input type="hidden" name="mod_name" value="{nome}">
-                <input type="password" name="pin_int" placeholder="PIN" style="width:70px; background:#0d1117; color:white; border:1px solid #333; padding:5px;">
-                <button name="action" value="ON" style="background:#238636; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; flex:1;">LIGAR</button>
-                <button name="action" value="OFF" style="background:#da3633; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; flex:1;">OFF</button>
-            </form>
-        </div>"""
-
-    return f"""
-    <body style="background:#0d1117; color:#c9d1d9; font-family:sans-serif; padding:20px;">
-        <div style="max-width:600px; margin:auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="color:#58a6ff; margin:0;">ORQUESTRADOR v86.2</h2>
-                <span style="font-size:10px; color:#8b949e;">ESTÁVEL</span>
-            </div>
-            <div style="display:grid; grid-template-columns: 1fr; gap:10px;">{mod_html}</div>
-            <hr style="border:0.1px solid #30363d; margin:30px 0;">
-            <h3 style="color:#8b949e;">LOGS DE OPERAÇÃO</h3>
-            <div style="background:#010409; padding:15px; border-radius:10px; font-family:monospace; font-size:11px; border:1px solid #30363d; height:250px; overflow-y:auto;">
-                {"".join([f"<div style='border-bottom:1px solid #161b22; padding:5px 0;'>"
-                          f"<span style='color:#8b949e;'>[{l['data']}]</span> "
-                          f"<b style='color:#58a6ff;'>{l['mod']}</b>: {l['msg']} -> "
-                          f"<span style='color:{'#3fb950' if l['res']=='SUCESSO' else '#f85149'};'>{l['res']}</span></div>" for l in logs])}
-            </div>
-        </div>
-        <script>setTimeout(() => {{ location.reload(); }}, 30000);</script>
-    </body>"""
-
-@app.route('/toggle', methods=['POST'])
-def toggle():
-    if not session.get('logged_in'): return redirect(url_for('login'))
-    mod, act, pin = request.form.get('mod_name'), request.form.get('action'), request.form.get('pin_int')
-    state = load_json(STATE_FILE, {})
-    if act == "ON":
-        if pin == os.environ.get("pin_interior", "0000"):
-            state[mod] = "ON"
-            registrar_log("MÓDULO ATIVADO", mod)
-        else: registrar_log("PIN INCORRETO", mod, "NEGADO")
-    else:
-        state[mod] = "OFF"
-        registrar_log("MÓDULO SUSPENSO", mod)
-    save_json(STATE_FILE, state)
+    if request.form.get('pin_int') == os.environ.get("pin_interior", "0000"):
+        acc = Account.create()
+        session['new_addr'] = acc.address
+        session['new_key'] = acc._private_key.hex()
     return redirect(url_for('dashboard'))
 
 if __name__ == "__main__":

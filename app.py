@@ -1,94 +1,119 @@
-
-import os, datetime, time, threading, requests, math, cloudscraper
-from flask import Flask, session, redirect, url_for, request, Response
+import os, datetime, json, threading, time, requests, math
+from flask import Flask, render_template, request, redirect, url_for, session, send_file
+from web3 import Web3
+from fpdf import FPDF
+from io import BytesIO
 
 app = Flask(__name__)
-app.secret_key = os.urandom(32)
+app.secret_key = os.environ.get("FLASK_SECRET", "sniper_ultra_2026")
 
-PIN = os.environ.get("guardiao", "1234")
-META_FINAL = 1000000.00
-CARTEIRA_ALVO = "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"
+# --- CONFIGURAÇÕES DE AMBIENTE ---
+PIN_SISTEMA = os.environ.get("guardiao", "123456")
+PRIV_KEY = os.environ.get("private_key") # Chave privada deve estar no Render
+RPC_URL = "https://polygon-rpc.com"
+web3 = Web3(Web3.HTTPProvider(RPC_URL))
+CARTEIRA_ALVO = web3.to_checksum_address("0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E")
 
-saldo_usd = 0.0
-preco_btc = 0.0
-dias_meta = "Sincronizando..."
-status_rede = "Conectando..."
+BOT_STATE_FILE = "bot_state.json"
+LOGS_FILE = "logs.json"
 
-def motor_bypass():
-    global saldo_usd, preco_btc, dias_meta, status_rede
-    scraper = cloudscraper.create_scraper() # Disfarça o Agente como um navegador real
-    
-    while True:
+# --- PERSISTÊNCIA ---
+def load_json(f, d):
+    if os.path.exists(f):
         try:
-            # 1. Busca Preço BTC via Bypass
-            try:
-                r = scraper.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
-                preco_btc = float(r['price'])
-            except:
-                preco_btc = 98000.0 # Valor reserva se tudo falhar
+            with open(f, "r") as file: return json.load(file)
+        except: return d
+    return d
 
-            # 2. Busca Saldo via API de Explorador (Mais leve que Web3 para o Render)
-            try:
-                # Usando a API pública do Polygonscan (não precisa de chave para consultas simples)
-                url_bal = f"https://api.polygonscan.com/api?module=account&action=balance&address={CARTEIRA_ALVO}&tag=latest"
-                res_bal = scraper.get(url_bal, timeout=10).json()
-                
-                if res_bal.get('status') == '1':
-                    wei = int(res_bal['result'])
-                    bal_native = wei / 10**18
-                    # Saldo = (Moedas * Preço médio $0.40) + Seu aporte inicial
-                    saldo_usd = (bal_native * 0.40) + 1500.00
-                    status_rede = "✅ ONLINE (Bypass)"
-                else:
-                    saldo_usd = 1500.00
-                    status_rede = "⚠️ API BUSY"
-            except:
-                saldo_usd = 1500.00
-                status_rede = "❌ RESTRITO"
+def save_json(f, d):
+    with open(f, "w") as file: json.dump(d, file, indent=4)
 
-            # 3. Projeção
-            n = math.log(META_FINAL / saldo_usd) / math.log(1 + 0.015)
-            dias_meta = f"{int(n)} dias"
-            
-        except Exception as e:
-            status_rede = "🔌 RECONECTANDO..."
-        
-        time.sleep(15)
+def registrar_log(msg, lado="AUTO", res="OK"):
+    logs = load_json(LOGS_FILE, [])
+    logs.insert(0, {"data": datetime.datetime.now().strftime("%H:%M:%S"), "mercado": msg, "lado": lado, "resultado": res})
+    save_json(LOGS_FILE, logs[:50])
 
-threading.Thread(target=motor_bypass, daemon=True).start()
+# --- MOTOR DE TRANSAÇÃO (EFETIVAÇÃO) ---
+def efetivar_transacao():
+    if not PRIV_KEY:
+        registrar_log("Chave privada ausente", "SISTEMA", "ERRO")
+        return
+    
+    try:
+        conta = web3.eth.account.from_key(PRIV_KEY)
+        # Prepara transação básica de interação para manter a carteira ativa ou executar swap
+        tx = {
+            'nonce': web3.eth.get_transaction_count(conta.address),
+            'to': CARTEIRA_ALVO,
+            'value': web3.to_wei(0, 'ether'),
+            'gas': 21000,
+            'gasPrice': web3.eth.gas_price,
+            'chainId': 137
+        }
+        signed_tx = web3.eth.account.sign_transaction(tx, PRIV_KEY)
+        tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        registrar_log(f"TX Efetivada: {tx_hash.hex()[:10]}...", "EXEC", "SUCESSO")
+    except Exception as e:
+        registrar_log(f"Falha na rede: {str(e)[:25]}", "EXEC", "FALHA")
 
-# --- MANTÉM O RESTANTE DAS ROTAS IGUAL (INDEX, LOGIN) ---
-@app.route('/')
-def index():
-    if not session.get('auth'): return redirect(url_for('login'))
-    progresso = min((saldo_usd / META_FINAL) * 100, 100)
-    return f"""
-    <body style="background:#000; color:#eee; font-family:sans-serif; text-align:center; padding:30px;">
-        <div style="max-width:500px; margin:auto; background:#0a0a0a; border:1px solid #333; padding:40px; border-radius:30px;">
-            <h2 style="color:#f3ba2f; margin:0;">OMNI v81 🔥</h2>
-            <div style="font-size:10px; color:lime; margin-top:10px;">{status_rede}</div>
-            <div style="margin:40px 0;">
-                <small style="color:#666;">PATRIMÔNIO ATUAL</small>
-                <h1 style="font-size:50px; margin:10px 0;">${saldo_usd:,.2f}</h1>
-                <div style="color:lime; font-weight:bold;">BTC: ${preco_btc:,.2f}</div>
-            </div>
-            <div style="background:#111; padding:25px; border-radius:20px; border:1px solid #222;">
-                <small style="color:#888;">DESTINO: 1 MILHÃO</small>
-                <h2 style="color:#f3ba2f; margin:10px 0;">{dias_meta}</h2>
-                <div style="background:#222; height:12px; border-radius:10px; overflow:hidden; margin-top:15px;">
-                    <div style="background:linear-gradient(90deg, #f3ba2f, #00ff00); width:{progresso}%; height:100%;"></div>
-                </div>
-            </div>
-        </div>
-        <script>setTimeout(()=>location.reload(), 15000);</script>
-    </body>"""
+def sniper_loop():
+    while True:
+        state = load_json(BOT_STATE_FILE, {"status": "OFF"})
+        if state["status"] == "ON" and PRIV_KEY:
+            efetivar_transacao()
+            time.sleep(600) # Intervalo de segurança para não drenar gás
+        time.sleep(10)
 
+if not any(t.name == "SniperBotThread" for t in threading.enumerate()):
+    threading.Thread(target=sniper_loop, name="SniperBotThread", daemon=True).start()
+
+# --- INTERFACE DE COMANDO ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'POST' and request.form.get('pin') == PIN:
-        session['auth'] = True
-        return redirect(url_for('index'))
-    return '<body style="background:#000;color:#f3ba2f;text-align:center;padding-top:100px;"><form method="post"><input type="password" name="pin" autofocus></form></body>'
+    if request.method == 'POST' and request.form.get('pin') == PIN_SISTEMA:
+        session['logged_in'] = True
+        return redirect(url_for('dashboard'))
+    return '<body style="background:#000;color:cyan;text-align:center;padding:100px;"><form method="post"><h2>SNIPER LOGIN</h2><input type="password" name="pin" autofocus></form></body>'
+
+@app.route('/')
+def dashboard():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    state = load_json(BOT_STATE_FILE, {"status": "OFF"})
+    logs = load_json(LOGS_FILE, [])
+    
+    status_color = "#00ff00" if state['status'] == 'ON' else "#ff0000"
+    
+    return f"""
+    <body style="background:#0e1117; color:white; font-family:sans-serif; padding:20px;">
+        <div style="max-width:800px; margin:auto; background:#1a1c24; padding:30px; border-radius:15px; border-top: 5px solid {status_color};">
+            <h1>Sniper Command Console</h1>
+            <p>Target: <code style="color:cyan;">{CARTEIRA_ALVO}</code></p>
+            <hr style="border:0.5px solid #333;">
+            
+            <div style="margin:20px 0;">
+                <form action="/toggle" method="post">
+                    <button name="action" value="ON" style="background:#00ff00; padding:15px 30px; font-weight:bold; cursor:pointer;">LIGAR BOT</button>
+                    <button name="action" value="OFF" style="background:#ff0000; padding:15px 30px; font-weight:bold; cursor:pointer; color:white;">DESLIGAR</button>
+                </form>
+            </div>
+
+            <h3>Histórico de Execução</h3>
+            <table style="width:100%; text-align:left; border-collapse:collapse;">
+                <tr style="background:#333;">
+                    <th style="padding:10px;">Hora</th><th style="padding:10px;">Ação</th><th style="padding:10px;">Status</th>
+                </tr>
+                {"".join([f"<tr><td style='padding:8px;border-bottom:1px solid #222;'>{l['data']}</td><td style='padding:8px;border-bottom:1px solid #222;'>{l['mercado']}</td><td style='padding:8px;border-bottom:1px solid #222;'>{l['resultado']}</td></tr>" for l in logs])}
+            </table>
+        </div>
+    </body>"""
+
+@app.route('/toggle', methods=['POST'])
+def toggle():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    action = request.form.get('action')
+    save_json(BOT_STATE_FILE, {"status": action})
+    registrar_log(f"Comando manual: {action}", "SISTEMA")
+    return redirect(url_for('dashboard'))
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))

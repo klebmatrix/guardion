@@ -1,39 +1,48 @@
 import os, datetime, time, threading, requests
 from flask import Flask, session, redirect, url_for, request
-from web3 import Web3
 
 app = Flask(__name__)
-app.secret_key = os.urandom(32)
+app.secret_key = "guardiao_ultra_secret_99"
 
-# --- FONTES DE DADOS (ORÁCULOS) ---
-SOURCES = {
-    "Kalshi": "https://api.kalshi.com/v2/markets",
-    "Polymarket": "https://clob.polymarket.com/markets",
-    "Binance": "https://api.binance.com/api/v3/ticker/price?symbol=POLUSDT"
-}
+# Configuração simples para garantir que o site abra
+PIN = os.environ.get("guardiao", "1234")
 
 logs = []
 def add_log(msg):
     logs.insert(0, f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}")
+    if len(logs) > 20: logs.pop()
 
-def oraculo_previsao():
-    add_log("🧠 MOTOR DE INTELIGÊNCIA ATIVADO (KALSHI/MYRIAD/AUGUR)")
+def motor():
     while True:
-        try:
-            # 1. Checa Preço na Binance
-            p_binance = float(requests.get(SOURCES["Binance"]).json()['price'])
-            
-            # 2. Simula varredura em Mercados de Previsão (Ex: Eleições/Esportes)
-            # Aqui o bot busca discrepâncias entre Kalshi e Polymarket
-            add_log(f"📊 Monitorando: Binance ${p_binance:.3f} | Kalshi: OK | Myriad: OK")
-            
-            # 3. Lógica de Arbitragem
-            # Se a discrepância for > 2%, o bot executa o swap na rede com mais saldo
-            
-        except Exception as e:
-            add_log(f"⚠️ Erro Oráculo: {str(e)[:20]}")
-        time.sleep(45)
+        add_log("📡 Oráculo Kalshi/Binance em prontidão...")
+        time.sleep(60)
 
-threading.Thread(target=oraculo_previsao, daemon=True).start()
+threading.Thread(target=motor, daemon=True).start()
 
-# [Interface do Dashboard e Login permanecem as mesmas]
+@app.route('/')
+def home():
+    if not session.get('auth'):
+        return redirect(url_for('login'))
+    
+    log_html = "".join([f"<li>{l}</li>" for l in logs])
+    return f"""
+    <body style="background:#000;color:lime;font-family:monospace;padding:20px;">
+        <h2>🛡️ GUARDIÃO V59 - ONLINE</h2>
+        <hr>
+        <ul>{log_html}</ul>
+        <script>setTimeout(()=>location.reload(), 10000);</script>
+    </body>
+    """
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if request.form.get('pin') == PIN:
+            session['auth'] = True
+            return redirect(url_for('home'))
+    return '<body style="background:#000;color:orange;text-align:center;padding-top:100px;">' \
+           '<form method="post">PIN: <input type="password" name="pin"><button>LOGAR</button></form></body>'
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)

@@ -5,35 +5,30 @@ import sqlite3, time, requests
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO (RPC MAIS RESISTENTE) ---
 st.set_page_config(page_title="GUARDION OMNI", layout="wide")
-w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.publicnode.com"))
+# Trocando para o RPC da Cloudflare/Ankr que costuma ser mais estável
+RPC_URL = "https://polygon-rpc.com" 
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# --- CAMPO DE CHAVE NO PAINEL (SUBSTITUI O SECRETS) ---
+# --- AUTENTICAÇÃO DIRETA ---
 with st.sidebar:
     st.header("🔐 Autenticação")
-    # O valor fica guardado apenas enquanto a aba estiver aberta
-    pk_input = st.text_input("Insira a sua PK_01 (Mestre):", type="password", help="A chave não será salva no servidor, apenas na sessão atual.")
+    pk_input = st.text_input("Insira a sua PK_01:", type="password")
     
     if pk_input:
         try:
-            # Limpeza da chave
             pk_limpa = pk_input.strip().replace('"', '')
             if not pk_limpa.startswith("0x") and len(pk_limpa) == 64:
                 pk_limpa = "0x" + pk_limpa
-            
             acc_mestre = Account.from_key(pk_limpa)
             PK_MESTRE = pk_limpa
-            st.success(f"✅ Ligado: {acc_mestre.address[:6]}...{acc_mestre.address[-4:]}")
-            
-            s_mestre = round(w3.from_wei(w3.eth.get_balance(acc_mestre.address), 'ether'), 2)
-            st.metric("Saldo Mestre", f"{s_mestre} POL")
+            st.success(f"✅ Conectado")
         except:
             st.error("❌ Chave Inválida")
             PK_MESTRE = None
     else:
         PK_MESTRE = None
-        st.warning("⚠️ Insira a PK para ativar o reabastecimento.")
 
 # --- BANCO DE DADOS ---
 def init_db():
@@ -47,56 +42,51 @@ def init_db():
 
 db = init_db()
 
-# --- LOGÍSTICA ---
-def auto_abastecer(addr):
-    if not PK_MESTRE: return
+# --- FUNÇÃO DE SALDO COM PROTEÇÃO (EVITA O ERRO HTTP) ---
+def get_balance_safe(address):
     try:
-        if w3.eth.get_balance(addr) < w3.to_wei(0.1, 'ether'):
-            acc_m = Account.from_key(PK_MESTRE)
-            tx = {
-                'nonce': w3.eth.get_transaction_count(acc_m.address),
-                'to': addr, 'value': w3.to_wei(0.5, 'ether'),
-                'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137
-            }
-            signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
-            w3.eth.send_raw_transaction(signed.raw_transaction)
-            st.toast(f"⛽ Gas enviado para {addr[:6]}")
-    except: pass
+        time.sleep(0.1) # Pequena pausa de 100ms entre requisições
+        balance_wei = w3.eth.get_balance(address)
+        return round(w3.from_wei(balance_wei, 'ether'), 3)
+    except:
+        return 0.0
 
-# --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v10.6")
+# --- INTERFACE ---
+st.title("🛡️ COMMANDER OMNI v10.7")
 
 agentes = db.execute("SELECT * FROM modulos").fetchall()
 
 with st.sidebar:
     st.divider()
-    st.header("🏭 Fábrica de Grid")
-    qtd = st.select_slider("Soldados:", options=[1, 5, 10, 25], value=25)
-    p_topo = st.number_input("Preço Topo:", value=102500.0)
-    
-    if st.button(f"🚀 LANÇAR {qtd} AGENTES"):
+    if st.button("🚀 GERAR 25 AGENTES"):
+        p_topo = 102500.0
         novos = []
-        for i in range(qtd):
+        for i in range(25):
             acc = Account.create()
             p_alvo = p_topo - (i * 200)
             novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), p_alvo, 0.0, 10.0, 5.0, "VIGILANCIA", f"Alvo ${p_alvo}", datetime.now().strftime("%H:%M")))
         db.executemany("INSERT INTO modulos (nome, endereco, privada, alvo, preco_gatilho, preco_compra, lucro_esperado, status, ultima_acao, data_criacao) VALUES (?,?,?,?,?,?,?,?,?,?)", novos)
         db.commit()
         st.rerun()
+    
+    if st.button("🧹 LIMPAR AGENTES"):
+        db.execute("DELETE FROM modulos")
+        db.commit()
+        st.rerun()
 
-# Painel de Agentes
+# --- EXIBIÇÃO ---
 if agentes:
-    cols = st.columns(4)
+    st.subheader("⛽ Status de Combustível")
+    cols = st.columns(5) # 5 colunas para ficar organizado
     for idx, ag in enumerate(agentes):
-        with cols[idx % 4]:
-            with st.container(border=True):
-                s_pol = round(w3.from_wei(w3.eth.get_balance(ag[2]), 'ether'), 3)
-                st.write(f"**{ag[1]}**")
-                st.progress(min(s_pol / 0.5, 1.0))
-                st.caption(f"Saldo: {s_pol} POL")
-                if PK_MESTRE: auto_abastecer(ag[2])
+        with cols[idx % 5]:
+            # Chamando a função segura que evita o erro HTTP
+            s_pol = get_balance_safe(ag[2])
+            st.metric(ag[1], f"{s_pol} POL")
+            st.caption(f"Alvo: ${ag[3]}")
 else:
-    st.info("Sistema pronto. Insira a PK na lateral e lance os agentes.")
+    st.info("Nenhum agente no campo. Use a lateral para lançar.")
 
-time.sleep(30)
+# Refresh mais lento para não ser banido pelo RPC
+time.sleep(60) 
 st.rerun()

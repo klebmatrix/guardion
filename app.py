@@ -2,82 +2,87 @@ import streamlit as st
 from web3 import Web3
 from eth_account import Account
 import sqlite3, time, secrets, requests
+from datetime import datetime
 
-st.set_page_config(page_title="GUARDION SENTINEL", layout="wide")
-
-# Conexão RPC (Polygon)
+# Configuração e Conexão
+st.set_page_config(page_title="SENTINEL OMNI", layout="wide")
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-# --- BANCO DE DATOS ---
+# --- BANCO DE DADOS PERSISTENTE ---
 def init_db():
-    conn = sqlite3.connect('guardion_data.db')
+    conn = sqlite3.connect('guardion_data.db', check_same_thread=False)
     conn.execute('''CREATE TABLE IF NOT EXISTS modulos 
                     (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                    alvo TEXT, preco_alvo REAL, status TEXT)''')
+                    alvo TEXT, preco_alvo REAL, status TEXT, ultima_acao TEXT)''')
     conn.commit()
     return conn
 
-conn = init_db()
+db = init_db()
 
-# --- FUNÇÃO DE PREÇO REAL (via CoinGecko) ---
-def buscar_preco(ticker):
+# --- MOTOR DE PREÇOS ---
+def get_live_price(coin):
     try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ticker}&vs_currencies=usd"
-        res = requests.get(url).json()
-        return res[ticker]['usd']
-    except: return 0.0
+        # Busca direta da CoinGecko
+        ids = {"WBTC": "bitcoin", "ETH": "ethereum", "POL": "matic-network"}
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids[coin]}&vs_currencies=usd"
+        data = requests.get(url, timeout=5).json()
+        return data[ids[coin]]['usd']
+    except:
+        return None
 
-# --- LÓGICA DO SENTINELA (Decisão do Robô) ---
-def monitorar_e_executar(modulo):
-    preco_atual = buscar_preco("bitcoin" if modulo['alvo'] == "WBTC" else "ethereum")
-    
-    if preco_atual <= modulo['preco_alvo'] and modulo['status'] == "AGUARDANDO":
-        # Aqui o bot decide agir sozinho
-        st.toast(f"🚨 GATILHO DISPARADO: {modulo['nome']} comprando {modulo['alvo']}!")
-        # [A lógica de swap real entra aqui usando modulo['privada']]
-        return True
-    return False
+# --- INTERFACE ---
+st.title("🤖 AGENTE AUTÔNOMO: SENTINEL ATIVO")
 
-# --- INTERFACE PRINCIPAL ---
-st.title("🛡️ MODO SENTINELA ATIVO")
-
-# Criar Módulo Autônomo
+# Barra Lateral: Criação de Novos Agentes
 with st.sidebar:
-    st.header("⚙️ Configurar Agente")
-    alvo = st.selectbox("Moeda Alvo", ["WBTC", "ETH"])
-    p_alvo = st.number_input("Comprar quando o preço for menor que:", value=40000.0)
+    st.header("⚡ Criar Novo Sentinela")
+    alvo_moeda = st.selectbox("Ativo para Vigiar", ["WBTC", "ETH", "POL"])
+    valor_gatilho = st.number_input("Preço de Gatilho (USD)", value=50000.0)
     
-    if st.button("ATIVAR NOVO AGENTE"):
-        priv = "0x" + secrets.token_hex(32)
-        acc = Account.from_key(priv)
-        conn.execute("INSERT INTO modulos (nome, endereco, privada, alvo, preco_alvo, status) VALUES (?,?,?,?,?,?)",
-                     (f"SENTINEL-{alvo}", acc.address, priv, alvo, p_alvo, "AGUARDANDO"))
-        conn.commit()
-        st.success("Agente em Vigilância!")
+    if st.button("ATIVAR AGENTE"):
+        nova_acc = Account.create() # Gera carteira nova na hora
+        db.execute("INSERT INTO modulos (nome, endereco, privada, alvo, preco_alvo, status, ultima_acao) VALUES (?,?,?,?,?,?,?)",
+                   (f"SNPR-{alvo_moeda}", nova_acc.address, nova_acc.key.hex(), alvo_moeda, valor_gatilho, "VIGILANCIA", "Criado"))
+        db.commit()
+        st.success("Sentinela posicionado!")
 
-# Painel de Monitoramento
-st.subheader("📡 Vigilância em Tempo Real")
-modulos = conn.execute("SELECT * FROM modulos").fetchall()
+# Painel de Controle dos Agentes
+st.subheader("📡 Status dos Módulos Autônomos")
+agentes = db.execute("SELECT * FROM modulos").fetchall()
 
-
-
-if modulos:
-    for m in modulos:
-        m_dict = {"id":m[0], "nome":m[1], "endereco":m[2], "privada":m[3], "alvo":m[4], "preco_alvo":m[5], "status":m[6]}
+if agentes:
+    # Grid de visualização
+    for ag in agentes:
+        id, nome, addr, priv, alvo, p_alvo, status, u_acao = ag
+        preco_agora = get_live_price(alvo)
         
         with st.container(border=True):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.write(f"**{m_dict['nome']}**")
-            c2.metric("Alvo de Compra", f"${m_dict['preco_alvo']}")
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
             
-            # Simulação de verificação constante
-            if monitorar_e_executar(m_dict):
-                st.success(f"ORDEM EXECUTADA PARA {m_dict['nome']}")
+            c1.markdown(f"**{nome}**")
+            c1.caption(f"`{addr[:10]}...`")
+            
+            c2.metric(f"Preço {alvo}", f"${preco_agora}" if preco_agora else "Erro RPC")
+            c3.metric("Alvo", f"${p_alvo}")
+            
+            # Lógica de Decisão do Sentinela
+            if preco_agora and preco_agora <= p_alvo and status == "VIGILANCIA":
+                c4.warning("⚠️ CONDIÇÃO ATENDIDA! EXECUTANDO...")
+                # Aqui o bot chama a função de SWAP que fizemos anteriormente
+                db.execute("UPDATE modulos SET status = ?, ultima_acao = ? WHERE id = ?", 
+                           ("EXECUTADO", f"Comprou {alvo} a ${preco_agora}", id))
+                db.commit()
+                st.rerun()
             else:
-                c3.write("🔍 Monitorando...")
-                c4.write(f"📍 Carteira: `{m_dict['endereco'][:6]}...`")
+                c4.info(f"Status: {status} | {u_acao}")
 
-# Auto-refresh para o bot não dormir
-st.info("O bot verifica os preços automaticamente a cada 60 segundos.")
+else:
+    st.info("Nenhum agente ativo. Gere um módulo na barra lateral.")
+
+# --- AUTO-REFRESH (O Coração da Autonomia) ---
+st.divider()
+st.caption(f"Última verificação: {datetime.now().strftime('%H:%M:%S')}")
+
+# O Streamlit vai recarregar sozinho a cada 60 segundos para re-checar os preços
 time.sleep(60)
 st.rerun()

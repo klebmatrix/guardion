@@ -4,8 +4,19 @@ from eth_account import Account
 import sqlite3, time, requests, datetime
 
 # --- 1. SETUP ---
-st.set_page_config(page_title="GUARDION OMNI v14.1 REAL", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v14.2 REAL", layout="wide")
 
+# --- 2. BANCO DE DADOS (INÍCIO ANTECIPADO) ---
+db = sqlite3.connect('guardion_real_v14.db', check_same_thread=False)
+db.execute('''CREATE TABLE IF NOT EXISTS agentes 
+                (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+                alvo REAL, status TEXT, preco_compra REAL, hash TEXT)''')
+db.commit()
+
+# Garante que a variável existe mesmo se o banco estiver vazio
+agentes = db.execute("SELECT * FROM agentes").fetchall()
+
+# --- 3. LOGIN ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if not st.session_state.logado:
     senha_mestre = st.secrets.get("SECRET_KEY", "mestre2026")
@@ -17,76 +28,46 @@ if not st.session_state.logado:
             st.rerun()
     st.stop()
 
-# --- 2. CONEXÃO RPC & BANCO ---
+# --- 4. CONEXÃO RPC ---
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-db = sqlite3.connect('guardion_real_v14.db', check_same_thread=False)
-db.execute('''CREATE TABLE IF NOT EXISTS agentes 
-                (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                alvo REAL, status TEXT, preco_compra REAL, hash TEXT)''')
-db.commit()
 
-# --- 3. MOTOR DE PREÇO RESILIENTE ---
+# --- 5. MOTOR DE PREÇO & FUNÇÕES REAIS ---
 def pegar_preco_btc():
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
         return float(r.json()['price'])
     except: return None
 
-# --- 4. FUNÇÃO DE COMPRA REAL (GERA HASH) ---
 def executar_compra_na_rede(privada_agente):
     try:
         acc = Account.from_key(privada_agente)
         saldo = w3.eth.get_balance(acc.address)
+        if saldo < w3.to_wei(0.001, 'ether'): return "ERRO: SEM POL (GAS)"
         
-        # Mínimo de POL necessário para o gás da transação
-        if saldo < w3.to_wei(0.01, 'ether'):
-            return "ERRO: SEM POL (GAS)"
-
-        tx = {
-            'nonce': w3.eth.get_transaction_count(acc.address),
-            'to': acc.address, # Transação real para si mesmo para validar o sniper na rede
-            'value': 0,
-            'gas': 21000,
-            'gasPrice': w3.eth.gas_price,
-            'chainId': 137
-        }
+        tx = {'nonce': w3.eth.get_transaction_count(acc.address), 'to': acc.address, 'value': 0, 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
         signed = w3.eth.account.sign_transaction(tx, privada_agente)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
         return w3.to_hex(tx_hash)
-    except Exception as e:
-        return f"FALHA: {str(e)[:15]}"
+    except Exception as e: return f"FALHA: {str(e)[:10]}"
 
-# --- 5. ABASTECIMENTO (ENVIO DE POL DA MESTRE) ---
 def abastecer_agentes(pk_mestre):
     try:
         mestre = Account.from_key(pk_mestre)
-        # Seleciona os primeiros 10 agentes para abastecer
         agentes_alvo = db.execute("SELECT endereco FROM agentes LIMIT 10").fetchall()
         for ag in agentes_alvo:
-            tx = {
-                'nonce': w3.eth.get_transaction_count(mestre.address),
-                'to': ag[0],
-                'value': w3.to_wei(0.5, 'ether'), # Envia 0.5 POL para cada
-                'gas': 21000,
-                'gasPrice': w3.eth.gas_price,
-                'chainId': 137
-            }
+            tx = {'nonce': w3.eth.get_transaction_count(mestre.address), 'to': ag[0], 'value': w3.to_wei(0.5, 'ether'), 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
             signed = w3.eth.account.sign_transaction(tx, pk_mestre)
             w3.eth.send_raw_transaction(signed.raw_transaction)
-            time.sleep(1.5) # Pausa para a rede não rejeitar o nonce
+            time.sleep(1.5)
         return True
     except: return False
 
 # --- 6. INTERFACE E LÓGICA ---
-st.title("🛡️ COMMANDER OMNI | v14.1 REAL EXECUTION")
+st.title("🛡️ COMMANDER OMNI | v14.2")
 btc = pegar_preco_btc()
 
 if btc:
-    st.metric("PREÇO BTC ATUAL", f"${btc:,.2f}")
-    
-    agentes = db.execute("SELECT * FROM agentes").fetchall()
-    
-    # Processamento de Compra Real
+    st.metric("BTC ATUAL", f"${btc:,.2f}")
     for ag in agentes:
         id_b, nome, addr, priv, alvo, status, p_compra, tx_h = ag
         if status == "VIGILANCIA" and btc <= alvo:
@@ -94,14 +75,12 @@ if btc:
             if shs.startswith("0x"):
                 db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (btc, shs, id_b))
                 db.commit()
-                st.success(f"🔥 Sniper {nome} executou! HASH: {shs[:15]}...")
+                st.toast(f"✅ {nome} disparou na rede!")
 
-# --- SIDEBAR COMANDOS ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ PAINEL DE CONTROLE")
-    pk_m = st.text_input("PK_01 (Mestre - 24 POL):", type="password")
-    
-    if st.button("🚀 LANÇAR 50 CARTEIRAS"):
+    pk_m = st.text_input("PK_01 (Mestre):", type="password")
+    if st.button("🚀 LANÇAR 50 SNIPERS"):
         db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
@@ -110,15 +89,12 @@ with st.sidebar:
                        (f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), alvo_calc, "VIGILANCIA", "---"))
         db.commit()
         st.rerun()
-    
-    if st.button("⛽ ABASTECER (0.5 POL p/ cada)"):
-        if pk_m:
-            if abastecer_agentes(pk_m): st.success("POL enviado aos Snipers!")
-            else: st.error("Erro no envio.")
-        else: st.warning("Insira a PK Mestre.")
+    if st.button("⛽ ABASTECER (0.5 POL)"):
+        if abastecer_agentes(pk_m): st.success("Abastecidos!")
+        else: st.error("Falha no envio")
 
-# --- TABS DE VISUALIZAÇÃO ---
-tab1, tab2 = st.tabs(["🎯 MONITOR DE CAMPO", "📄 LOGS & HASHES"])
+# --- 8. VISUALIZAÇÃO ---
+tab1, tab2 = st.tabs(["🎯 GRID", "📄 LOGS (SHS/HASH)"])
 with tab1:
     if agentes:
         cols = st.columns(5)
@@ -126,12 +102,14 @@ with tab1:
             with cols[idx % 5]:
                 with st.container(border=True):
                     st.write(f"**{ag[1]}**")
-                    if ag[5] == "COMPRADO": st.success("EXECUTADO ✅")
+                    if "0x" in str(ag[7]): st.success("EXECUTADO")
                     else: st.info(f"🎯 ${ag[4]:,.0f}")
 with tab2:
     if agentes:
         import pandas as pd
         df = pd.DataFrame(agentes, columns=['ID','Nome','Carteira','Privada','Alvo','Status','Preço','Hash'])
-        st.dataframe(df[['Nome', 'Status', 'Alvo', 'Hash', 'Carteira']], use_container_width=True)
+        # Link para PolygonScan Real
+        df['Ver no Scan'] = df['Hash'].apply(lambda x: f"https://polygonscan.com/tx/{x}" if x.startswith('0x') else x)
+        st.dataframe(df[['Nome', 'Status', 'Ver no Scan', 'Carteira']], use_container_width=True)
 
 time.sleep(20); st.rerun()

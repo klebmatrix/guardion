@@ -5,9 +5,25 @@ from web3 import Web3
 
 st.set_page_config(page_title="GUARDION ACTIVE", layout="wide")
 
-# RPC da Cloudflare (Geralmente não cai e não bloqueia)
-RPC_URL = "https://polygon-rpc.com" 
-w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={'timeout': 20}))
+# Lista de servidores para rodízio (Se um cair, o outro assume)
+RPCS = [
+    "https://polygon-rpc.com",
+    "https://polygon.llamarpc.com",
+    "https://1rpc.io/matic",
+    "https://rpc.ankr.com/polygon"
+]
+
+def conectar():
+    for url in RPCS:
+        try:
+            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
+            if w3.is_connected():
+                return w3, url
+        except:
+            continue
+    return None, None
+
+w3, rpc_ativa = conectar()
 
 CONTRATOS = {
     "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
@@ -27,19 +43,18 @@ def get_bal(tk, addr_chk):
 # --- INTERFACE ---
 st.title("🛡️ GUARDION ACTIVE | DASHBOARD")
 
-# LOGIN
 if "auth" not in st.session_state:
     senha = st.text_input("CHAVE DE ACESSO", type="password")
-    master_key = str(st.secrets.get("SECRET_KEY", "1234"))
-    if senha == master_key:
+    if senha == str(st.secrets.get("SECRET_KEY", "1234")):
         st.session_state["auth"] = True
         st.rerun()
     st.stop()
 
-# TESTE DE CONEXÃO INICIAL
-if not w3.is_connected():
-    st.error("🔴 Sem resposta da rede Polygon. Tentando trocar de servidor...")
-    w3 = Web3(Web3.HTTPProvider("https://polygon.llamarpc.com"))
+if not w3:
+    st.error("🔴 Bloqueio de Rede: Todos os servidores Polygon falharam. O Streamlit está impedindo a conexão.")
+    if st.button("TENTAR NOVAMENTE"):
+        st.rerun()
+    st.stop()
 
 # MÓDULOS
 cols = st.columns(3)
@@ -52,33 +67,22 @@ modulos = [
 for i, (titulo, env_var, alvo) in enumerate(modulos):
     with cols[i]:
         st.subheader(titulo)
+        addr = str(st.secrets.get(env_var, "")).strip().replace('"', '').replace("'", "")
         
-        # BUSCA E LIMPEZA
-        raw_addr = str(st.secrets.get(env_var, ""))
-        clean_addr = raw_addr.strip().replace('"', '').replace("'", "")
-        
-        if clean_addr.startswith("0x") and len(clean_addr) == 42:
+        if len(addr) == 42 and addr.startswith("0x"):
             try:
-                chk = w3.to_checksum_address(clean_addr)
-                
-                # Pega POL e USDC
+                chk = w3.to_checksum_address(addr)
                 pol = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
                 usdc = get_bal("USDC", chk)
-                
                 st.metric("POL (Gas)", f"{pol}")
                 st.metric("USDC", f"{usdc}")
-                
                 if alvo != "MULTI":
                     st.metric(alvo, f"{get_bal(alvo, chk)}")
-                
                 st.button(f"EXECUTAR {titulo}", key=f"btn_{i}")
-                
-            except Exception as e:
-                st.error(f"Erro ao ler saldo. Tente atualizar.")
+            except:
+                st.error("Erro ao ler dados")
         else:
-            st.warning(f"Aguardando {env_var}")
+            st.warning(f"Configurar {env_var}")
 
 st.divider()
-st.info(f"Conexão ativa: {w3.is_connected()}")
-if st.button("🔄 FORÇAR RECONEXÃO"):
-    st.rerun()
+st.caption(f"Conectado via: {rpc_ativa}")

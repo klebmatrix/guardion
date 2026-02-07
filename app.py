@@ -3,12 +3,11 @@ import os, sqlite3, time
 from datetime import datetime
 from web3 import Web3
 
-# 1. Configuração Inicial
-st.set_page_config(page_title="GUARDION OMNI", layout="wide")
+# 1. Configuração da Página
+st.set_page_config(page_title="GUARDION ACTIVE", layout="wide")
 
-# 2. Conexão com a Rede
-RPC_URL = "https://polygon-rpc.com"
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+# 2. Conexão Polygon (RPC Estável)
+w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
 CONTRATOS = {
     "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
@@ -17,16 +16,13 @@ CONTRATOS = {
 }
 ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-# 3. Banco de Dados Simples
+# 3. Funções de Apoio
 def init_db():
     conn = sqlite3.connect('historico.db')
     conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
     conn.commit()
     conn.close()
 
-init_db()
-
-# 4. Função de Saldo Protegida
 def get_bal(tk, addr_chk):
     try:
         c = w3.eth.contract(address=w3.to_checksum_address(CONTRATOS[tk]), abi=ABI)
@@ -35,72 +31,70 @@ def get_bal(tk, addr_chk):
         return round(raw / (10**dec), 4)
     except: return 0.0
 
-# 5. Função de Renderização Blindada
-def render_modulo(col, titulo, carteira_env, alvo):
-    addr_raw = os.environ.get(carteira_env, "").strip()
-    
-    with col:
-        st.subheader(titulo)
-        # Validação de Segurança
-        if not addr_raw:
-            st.warning(f"⚠️ {carteira_env} não configurada.")
-            return
-        if not addr_raw.startswith("0x") or len(addr_raw) != 42:
-            st.error(f"❌ Endereço inválido em {carteira_env}")
-            return
+init_db()
 
-        try:
-            chk = w3.to_checksum_address(addr_raw)
-            # Busca de Dados
-            pol_bal = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
-            usdc_bal = get_bal("USDC", chk)
-            
-            st.metric("POL (Gas)", f"{pol_bal}")
-            st.metric("USDC", f"{usdc_bal}")
-            if alvo != "MULTI":
-                st.metric(alvo, f"{get_bal(alvo, chk)}")
-
-            if st.button(f"EXECUTAR {alvo}", key=f"btn_{titulo}"):
-                tx_hash = "0x" + os.urandom(20).hex()
-                with sqlite3.connect('historico.db') as conn:
-                    conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
-                                 (datetime.now().strftime("%H:%M:%S"), titulo, f"SWAP {alvo}", tx_hash))
-                st.success(f"Enviado! {tx_hash[:10]}")
-                time.sleep(1)
-                st.rerun()
-        except:
-            st.error("Erro na Blockchain")
-
-# --- INTERFACE PRINCIPAL ---
+# --- INTERFACE ---
 st.title("🛡️ GUARDION ACTIVE | DASHBOARD")
 
-# LOGIN
+# LOGIN (Puxa do Secrets)
 if "auth" not in st.session_state:
-    key = st.text_input("CHAVE DE ACESSO", type="password")
-    if key == os.environ.get("SECRET_KEY", "1234"):
+    senha = st.text_input("CHAVE DE ACESSO", type="password")
+    if senha == st.secrets.get("SECRET_KEY", "1234"):
         st.session_state["auth"] = True
         st.rerun()
     st.stop()
 
-# STATUS
-st.sidebar.markdown(f"**Status:** {'🟢 ONLINE' if w3.is_connected() else '🔴 OFFLINE'}")
+# BARRA LATERAL
+st.sidebar.header("Status do Agente")
+st.sidebar.success("CONECTADO À POLYGON" if w3.is_connected() else "ERRO DE CONEXÃO")
 
-# MÓDULOS
-c1, c2, c3 = st.columns(3)
-render_modulo(c1, "MÓDULO 01", "WALLET_01", "WBTC")
-render_modulo(c2, "MÓDULO 02", "WALLET_02", "USDT")
-render_modulo(c3, "MÓDULO 03", "WALLET_03", "MULTI")
+# 4. MÓDULOS (Onde os cards aparecem)
+cols = st.columns(3)
+modulos = [
+    ("MÓDULO 01", "WALLET_01", "WBTC"),
+    ("MÓDULO 02", "WALLET_02", "USDT"),
+    ("MÓDULO 03", "WALLET_03", "MULTI")
+]
 
-# HISTÓRICO
+for i, (titulo, env_var, alvo) in enumerate(modulos):
+    with cols[i]:
+        st.subheader(titulo)
+        # Tenta pegar o endereço do Secrets do Streamlit
+        addr = st.secrets.get(env_var, "").strip()
+        
+        if not addr:
+            st.warning(f"Configurar {env_var} nos Secrets")
+        elif len(addr) > 42:
+            st.error("⚠️ Você colou a Private Key! Troque pelo Endereço (0x...)")
+        else:
+            try:
+                chk = w3.to_checksum_address(addr)
+                pol = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
+                usdc = get_bal("USDC", chk)
+                
+                st.metric("POL (Gas)", f"{pol}")
+                st.metric("USDC", f"{usdc}")
+                if alvo != "MULTI":
+                    st.metric(alvo, f"{get_bal(alvo, chk)}")
+                
+                if st.button(f"EXECUTAR {titulo}", key=f"btn_{i}"):
+                    tx = "0x" + os.urandom(20).hex()
+                    with sqlite3.connect('historico.db') as conn:
+                        conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
+                                     (datetime.now().strftime("%H:%M:%S"), titulo, f"SWAP {alvo}", tx))
+                    st.success("Ordem Registrada!")
+                    time.sleep(1)
+                    st.rerun()
+            except:
+                st.error("Endereço Inválido")
+
+# 5. HISTÓRICO
 st.divider()
-st.subheader("📜 Histórico")
+st.subheader("📜 Histórico Recente")
 try:
     with sqlite3.connect('historico.db') as conn:
         import pandas as pd
         df = pd.read_sql_query("SELECT data, mod, acao, hash FROM logs ORDER BY id DESC LIMIT 10", conn)
-        if not df.empty:
-            st.table(df)
-        else:
-            st.info("Nenhuma operação hoje.")
+        st.dataframe(df, use_container_width=True)
 except:
-    st.write("Aguardando transações...")
+    st.info("Nenhuma operação registrada ainda.")

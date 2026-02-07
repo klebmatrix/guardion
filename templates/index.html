@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>GUARDION DASHBOARD | V2.1</title>
+    <title>GUARDION DASHBOARD | V2.2</title>
     <style>
         body { background: #050505; color: #00f2ff; font-family: 'JetBrains Mono', monospace; padding: 20px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 15px; }
@@ -11,18 +11,19 @@
         .label { color: #555; font-size: 12px; }
         .val { color: #00ff88; font-weight: bold; float: right; }
         .token-row { margin-bottom: 5px; border-bottom: 1px dashed #111; padding-bottom: 2px; }
-        button { background: #00f2ff; color: #000; border: none; padding: 12px; cursor: pointer; width: 100%; font-weight: bold; border-radius: 6px; margin-top: 10px; transition: 0.3s; }
-        button:hover { background: #fff; }
+        button { background: #00f2ff; color: #000; border: none; padding: 10px; cursor: pointer; width: 100%; font-weight: bold; border-radius: 6px; margin-top: 10px; transition: 0.3s; }
+        .btn-copy { background: transparent; color: #00f2ff; border: 1px solid #00f2ff; padding: 2px 6px; font-size: 10px; width: auto; margin: 0 0 0 10px; display: inline-block; }
+        .btn-copy:hover { background: #00f2ff; color: #000; }
         table { width: 100%; margin-top: 30px; border-collapse: collapse; font-size: 12px; }
         th { text-align: left; color: #555; padding: 10px; border-bottom: 1px solid #222; }
         td { padding: 10px; border-bottom: 1px solid #111; color: #eee; }
-        .status-msg { color: #f7931a; font-size: 11px; text-align: center; margin-top: 10px; display: none; }
+        .hash-cell { font-family: monospace; color: #444; display: flex; align-items: center; }
     </style>
 </head>
 <body>
     <h2 style="letter-spacing: 2px;">🛡️ PAINEL GUARDION ACTIVE</h2>
     
-    <div class="grid" id="cards">
+    <div class="grid">
         <div class="card">
             <h3>MÓDULO 01 (ESTRUTURA WBTC)</h3>
             <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_01">0.00</span></div>
@@ -43,12 +44,10 @@
             <h3>MÓDULO 03 (DIVERSIFICAÇÃO)</h3>
             <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_03">0.00</span></div>
             <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_03">0.00</span></div>
-            <div class="token-row"><span class="label">MULTI-ATIVOS:</span> <span class="val" id="multi-status">ATIVO</span></div>
+            <div class="token-row"><span class="label">MULTI-ATIVOS:</span> <span class="val">ATIVO</span></div>
             <button onclick="swap('MOD_03')" style="background: #8b5cf6; color: #fff;">DIVERSIFICAR AGORA</button>
         </div>
     </div>
-
-    <div id="status" class="status-msg">ENVIANDO ORDEM PARA O AGENTE...</div>
 
     <h3 style="margin-top: 40px; border-left: 4px solid #00f2ff; padding-left: 10px;">📜 LOG DE TRANSAÇÕES</h3>
     <table>
@@ -57,6 +56,11 @@
     </table>
 
     <script>
+        function copiarHash(hash) {
+            navigator.clipboard.writeText(hash);
+            alert("Hash copiado!");
+        }
+
         async function load() {
             try {
                 const s = await (await fetch('/saldos')).json();
@@ -68,22 +72,26 @@
                 }
                 const h = await (await fetch('/historico')).json();
                 document.getElementById('hist').innerHTML = h.map(l => `
-                    <tr><td>${l[1]}</td><td><span style="color:#00f2ff">${l[2]}</span></td><td>${l[3]}</td><td style="color:#444">${l[4]}</td></tr>
+                    <tr>
+                        <td>${l[1]}</td>
+                        <td><span style="color:#00f2ff">${l[2]}</span></td>
+                        <td>${l[3]}</td>
+                        <td class="hash-cell">
+                            ${l[4].slice(0,12)}... 
+                            <button class="btn-copy" onclick="copiarHash('${l[4]}')">COPIAR</button>
+                        </td>
+                    </tr>
                 `).join('');
-            } catch(e) { console.log("Erro ao carregar dados..."); }
+            } catch(e) {}
         }
 
         async function swap(m) {
-            document.getElementById('status').style.display = 'block';
             await fetch('/converter', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({modulo: m})
             });
-            setTimeout(() => {
-                document.getElementById('status').style.display = 'none';
-                load();
-            }, 2000);
+            load();
         }
 
         setInterval(load, 5000);

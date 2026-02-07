@@ -4,58 +4,52 @@ from eth_account import Account
 import sqlite3, time, pandas as pd
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GUARDION OMNI v14.0", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v14.1", layout="wide")
 RPC_POLYGON = "https://polygon-rpc.com"
 
 # --- LOGIN ---
-SENHA_MESTRA = st.secrets.get("SECRET_KEY", "mestre2026")
+SENHA_MESTRA = st.secrets.get("SECRET_KEY")
 if "logado" not in st.session_state: st.session_state.logado = False
 if not st.session_state.logado:
     st.title("🔐 ACESSO AO QG")
-    if st.text_input("Chave:", type="password") == SENHA_MESTRA:
-        st.session_state.logado = True
-        st.rerun()
+    senha = st.text_input("Chave:", type="password")
+    if st.button("ENTRAR"):
+        if senha == SENHA_MESTRA:
+            st.session_state.logado = True
+            st.rerun()
     st.stop()
 
-# --- DB ---
+# --- DB COM ESTRUTURA BLINDADA ---
 db = sqlite3.connect('guardion_v6.db', check_same_thread=False)
-db.execute('''CREATE TABLE IF NOT EXISTS agentes_v6 
-                (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                alvo REAL, status TEXT, preco_compra REAL, lucro_acumulado REAL)''')
-db.commit()
 
-# --- LOGÍSTICA DE POL (CÁLCULO DO AGENTE) ---
-def dividir_pol_automatico(pk_mestra):
-    w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
-    try:
-        mestra = Account.from_key(pk_mestra)
-        saldo = float(w3.from_wei(w3.eth.get_balance(mestra.address), 'ether'))
-        disponivel = saldo - 0.5 # Reserva de segurança
-        fatia = disponivel / 50
-        
-        st.info(f"💰 Saldo: {saldo:.2f} POL | Enviando {fatia:.4f} para cada Sniper.")
-        # Lógica de envio em massa aqui...
-        st.success("⛽ Gás distribuído!")
-    except: st.error("Erro na PK Mestra")
+# Função para garantir que a tabela tenha as 8 colunas exatas
+def preparar_db():
+    db.execute("DROP TABLE IF EXISTS agentes_v6") # Reset para alinhar as colunas
+    db.execute('''CREATE TABLE agentes_v6 
+                (id INTEGER PRIMARY KEY, 
+                 nome TEXT, 
+                 endereco TEXT, 
+                 privada TEXT, 
+                 alvo REAL, 
+                 status TEXT, 
+                 preco_compra REAL, 
+                 lucro_acumulado REAL)''')
+    db.commit()
 
-# --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v14.0 | OPERAÇÃO INTERNA")
+# --- INTERFACE E CONTROLE INTERNO ---
+st.title("🛡️ COMMANDER OMNI v14.1 | LUCRO EXPLÍCITO")
 
-# REMOVIDO API EXTERNA - PREÇO AGORA É CONTROLADO PELO COMANDANTE
-if "btc_interno" not in st.session_state: st.session_state.btc_interno = 96000.0
+if "btc_interno" not in st.session_state:
+    st.session_state.btc_interno = 96000.0
 
 with st.sidebar:
-    st.header("🎮 CONTROLE DE MERCADO")
-    st.session_state.btc_interno = st.number_input("Preço Interno BTC ($):", value=st.session_state.btc_interno, step=10.0)
+    st.header("🎮 CONTROLE DO AGENTE")
+    st.session_state.btc_interno = st.number_input("Preço Interno BTC ($):", value=st.session_state.btc_interno, step=50.0)
     tp_pct = st.slider("Take Profit (%)", 0.1, 5.0, 1.5)
     
     st.divider()
-    pk_m = st.text_input("PK Mestra (Logística):", type="password")
-    if st.button("💸 DISTRIBUIR POL (AUTO)"):
-        dividir_pol_automatico(pk_m)
-    
-    if st.button("🚀 RESETAR 50 SNIPERS"):
-        db.execute("DELETE FROM agentes_v6")
+    if st.button("🚀 REINICIAR E ALINHAR 50 SNIPERS"):
+        preparar_db()
         for i in range(50):
             acc = Account.create()
             db.execute("INSERT INTO agentes_v6 VALUES (?,?,?,?,?,?,?,?)",
@@ -63,47 +57,49 @@ with st.sidebar:
         db.commit()
         st.rerun()
 
-# --- PROCESSAMENTO E EXIBIÇÃO DE LUCROS ---
+# --- PROCESSAMENTO ---
 btc = st.session_state.btc_interno
-agentes = db.execute("SELECT * FROM agentes_v6").fetchall()
-lucro_total = 0
+# Busca todos os dados da tabela
+agentes = db.execute("SELECT id, nome, endereco, privada, alvo, status, preco_compra, lucro_acumulado FROM agentes_v6").fetchall()
 
-for ag in agentes:
-    id_ag, nome, _, _, alvo, status, p_compra, l_acum = ag
-    lucro_total += l_acum
-    
-    # Lógica de Compra
-    if btc <= alvo and status == "VIGILANCIA":
-        db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=? WHERE id=?", (btc, id_ag))
-        db.commit()
-    
-    # Lógica de Take Profit (Ativo Infinito)
-    elif status == "COMPRADO":
-        lucro_atual = btc - p_compra
-        if btc >= p_compra * (1 + (tp_pct/100)):
-            novo_lucro = l_acum + lucro_atual
-            db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, lucro_acumulado=? WHERE id=?", (novo_lucro, id_ag))
+lucro_total_geral = 0
+if agentes:
+    cols = st.columns(5)
+    for i, ag in enumerate(agentes):
+        # Desempacotamento seguro das 8 colunas
+        id_ag, nome, end, priv, alvo, status, p_compra, l_acum = ag
+        lucro_total_geral += l_acum
+        
+        # Logica de Compra
+        if btc <= alvo and status == "VIGILANCIA":
+            db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=? WHERE id=?", (btc, id_ag))
             db.commit()
+            
+        # Logica de Take Profit (Reset Ativo Infinito)
+        elif status == "COMPRADO":
+            if btc >= p_compra * (1 + (tp_pct/100)):
+                lucro_da_venda = btc - p_compra
+                novo_lucro_total = l_acum + lucro_da_venda
+                db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, lucro_acumulado=? WHERE id=?", (novo_lucro_total, id_ag))
+                db.commit()
 
-# DASHBOARD DE LUCROS
-st.markdown(f"### 💵 Lucro Total da Tropa: <span style='color:green'>${lucro_total:,.2f}</span>", unsafe_allow_html=True)
+        # Exibição nos Cards
+        with cols[i % 5]:
+            with st.container(border=True):
+                st.write(f"**{nome}**")
+                if status == "COMPRADO":
+                    st.success(f"HOLDING")
+                    st.caption(f"C: ${p_compra:,.0f}")
+                else:
+                    st.info(f"VIGILANDO")
+                    st.caption(f"Alvo: ${alvo:,.0f}")
+                st.write(f"💰 Lucro: **${l_acum:,.2f}**")
 
-cols = st.columns(5)
-for i, a in enumerate(agentes):
-    with cols[i % 5]:
-        with st.container(border=True):
-            st.write(f"**{a[1]}**")
-            if a[5] == "COMPRADO":
-                rendimento = ((btc / a[6]) - 1) * 100
-                st.success(f"HOLD: {rendimento:.2f}%")
-                st.caption(f"Compra: ${a[6]:,.0f}")
-            else:
-                st.info(f"VIGILANDO: ${a[4]:,.0f}")
-            st.markdown(f"**Lucro Real: ${a[7]:,.2f}**")
+    st.divider()
+    st.markdown(f"## 💵 LUCRO TOTAL ACUMULADO: :green[${lucro_total_geral:,.2f}]")
+else:
+    st.warning("Clique em 'REINICIAR E ALINHAR' para criar as carteiras e começar.")
 
-# TABELA DE CONFERÊNCIA
-with st.expander("📊 Detalhes do Histórico"):
-    df = pd.DataFrame(agentes, columns=['ID', 'Agente', 'Carteira', 'Privada', 'Alvo', 'Status', 'P.Compra', 'Lucro Total'])
-    st.dataframe(df[['Agente', 'Status', 'P.Compra', 'Lucro Total']], use_container_width=True)
-
+# Auto-refresh para manter o sistema vivo
+time.sleep(10)
 st.rerun()

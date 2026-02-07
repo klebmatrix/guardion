@@ -1,15 +1,15 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, requests, datetime
+import sqlite3, time, requests, pandas as pd
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GUARDION OMNI v12", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v12.1", layout="wide", initial_sidebar_state="collapsed")
 
-# --- LOGIN ---
+# --- LOGIN (SECRETS) ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if not st.session_state.logado:
-    st.title("🔐 QG GUARDION v12.0")
+    st.title("🔐 QG GUARDION v12.1")
     senha = st.text_input("Chave do QG:", type="password")
     if st.button("ENTRAR"):
         if senha == st.secrets.get("SECRET_KEY", "mestre2026"):
@@ -18,48 +18,69 @@ if not st.session_state.logado:
         else: st.error("Incorreta")
     st.stop()
 
-# --- BANCO DE DADOS v6 (SUPORTE A 50 AGENTES) ---
+# --- CONEXÃO BANCO DE DADOS ---
 db = sqlite3.connect('guardion_v6.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes_v6 
                 (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
                 alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
 db.commit()
 
-# --- MOTOR DE PREÇO (MULTI-FONTE) ---
+# --- MOTOR DE PREÇO ---
 def pegar_preco():
     try: return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()['price'])
-    except:
-        try: return float(requests.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSDT").json()['result']['XBTUSDT']['c'][0])
-        except: return None
+    except: return None
+
+# --- MOTOR DE EXECUÇÃO ATIVA (TAKE PROFIT INFINITO) ---
+def processar_operacoes(btc_atual, porcentagem_tp):
+    agentes = db.execute("SELECT * FROM agentes_v6").fetchall()
+    for ag in agentes:
+        id_ag, nome, _, _, alvo, status, preco_compra, _ = ag
+        
+        # 🟢 GATILHO DE COMPRA (Preço caiu abaixo do Alvo do Grid)
+        if btc_atual <= alvo and status == "VIGILANCIA":
+            nova_acao = f"✅ Comprado a ${btc_atual:,.2f}"
+            db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=?, ultima_acao=? WHERE id=?", 
+                       (btc_atual, nova_acao, id_ag))
+            db.commit()
+            st.toast(f"🎯 {nome}: COMPRADO!")
+
+        # 🔴 GATILHO DE VENDA (TAKE PROFIT ATIVO INFINITO)
+        elif status == "COMPRADO":
+            alvo_venda = preco_compra * (1 + (porcentagem_tp / 100))
+            if btc_atual >= alvo_venda:
+                lucro = btc_atual - preco_compra
+                nova_acao = f"💰 Lucro: ${lucro:,.2f} | Resetando..."
+                # Volta para VIGILANCIA para reentrada infinita
+                db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, ultima_acao=? WHERE id=?", 
+                           (nova_acao, id_ag))
+                db.commit()
+                st.toast(f"💸 {nome}: TAKE PROFIT BATIDO!")
 
 # --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v12.0 | 50 SNIPERS")
+st.title("🛡️ COMMANDER OMNI v12.1 | 50 SNIPERS")
 btc = pegar_preco()
 
 if btc:
-    st.metric("BTC ATUAL", f"${btc:,.2f}")
+    # Telemetria Superior
+    c1, c2, c3 = st.columns(3)
+    c1.metric("BTC ATUAL", f"${btc:,.2f}")
     
     with st.sidebar:
         st.header("⚙️ COMANDO CENTRAL")
-        pk_m = st.text_input("PK_01 (Saldo: 24 POL):", type="password")
-        novo_topo = st.number_input("Novo Topo do Grid ($):", value=btc)
+        tp_input = st.slider("Take Profit (%)", 0.5, 10.0, 2.0)
+        distancia = st.number_input("Distância Grid ($)", value=150)
         
-        if st.button("🚀 LANÇAR 50 SNIPERS (GRID DINÂMICO)"):
+        if st.button("🚀 REINICIALIZAR 50 SNIPERS"):
             db.execute("DELETE FROM agentes_v6")
-            novos = []
-            for i in range(50):
-                acc = Account.create()
-                alvo = novo_topo - (i * 150) # Distância de $150 entre os 50 agentes
-                novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", 0.0, "Iniciado"))
+            novos = [(f"SNPR-{i+1:02d}", Account.create().address, Account.create().key.hex(), btc - (i * distancia), "VIGILANCIA", 0.0, "Pronto") for i in range(50)]
             db.executemany("INSERT INTO agentes_v6 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
             db.commit()
             st.rerun()
-            
-        if st.button("🚪 SAIR"):
-            st.session_state.logado = False
-            st.rerun()
 
-    # --- TABELA DE RELATÓRIO (ITEM 2) ---
+    # Processamento em tempo real
+    processar_operacoes(btc, tp_input)
+
+    # Painel de Monitoramento
     tab1, tab2 = st.tabs(["🎯 Monitor do Grid", "📊 Relatório de Operações"])
     
     with tab1:
@@ -68,22 +89,25 @@ if btc:
             cols = st.columns(5)
             for idx, ag in enumerate(agentes):
                 with cols[idx % 5]:
+                    cor = "green" if ag[5] == "COMPRADO" else "normal"
                     with st.container(border=True):
-                        st.write(f"**{ag[1]}**")
-                        st.caption(f"Alvo: ${ag[4]:,.0f}")
-                        if ag[5] == "COMPRADO": st.success(f"P: ${ag[6]:,.0f}")
-                        else: st.info(ag[5])
-        else: st.warning("Aguardando lançamento do batalhão de 50 agentes.")
+                        st.markdown(f"### {ag[1]}")
+                        st.caption(f"🎯 Alvo Compra: ${ag[4]:,.0f}")
+                        if ag[5] == "COMPRADO":
+                            st.write(f"📈 P. Compra: **${ag[6]:,.0f}**")
+                            st.write(f"🚀 Alvo TP: **${ag[6]*(1+(tp_input/100)):,.0f}**")
+                        else:
+                            st.info("Aguardando Preço...")
+        else: st.warning("Exército desativado. Use o menu lateral.")
 
     with tab2:
-        st.subheader("Histórico em Tempo Real")
         if agentes:
-            import pandas as pd
             df = pd.DataFrame(agentes, columns=['ID', 'Nome', 'Endereço', 'Privada', 'Alvo', 'Status', 'Preço Compra', 'Última Ação'])
             st.dataframe(df[['Nome', 'Status', 'Preço Compra', 'Última Ação']], use_container_width=True)
 
 else:
-    st.error("Reconectando à rede...")
+    st.error("Falha na conexão com a rede Binance/Kraken.")
 
+# Refresh Automático para o Loop Infinito
 time.sleep(30)
 st.rerun()

@@ -2,62 +2,88 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>GUARDION DASH</title>
+    <title>GUARDION DASHBOARD | V2.1</title>
     <style>
-        body { background: #050505; color: #00f2ff; font-family: monospace; padding: 20px; }
-        .card { border: 1px solid #222; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #0a0a0a; }
-        .val { color: #fff; font-weight: bold; }
-        button { background: #00f2ff; color: #000; border: none; padding: 10px; cursor: pointer; width: 100%; font-weight: bold; }
-        table { width: 100%; margin-top: 20px; border-top: 1px solid #222; }
-        th { text-align: left; color: #555; }
+        body { background: #050505; color: #00f2ff; font-family: 'JetBrains Mono', monospace; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 15px; }
+        .card { border: 1px solid #222; padding: 15px; border-radius: 12px; background: #0a0a0a; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .card h3 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #1a1a1a; padding-bottom: 5px; color: #fff; }
+        .label { color: #555; font-size: 12px; }
+        .val { color: #00ff88; font-weight: bold; float: right; }
+        .token-row { margin-bottom: 5px; border-bottom: 1px dashed #111; padding-bottom: 2px; }
+        button { background: #00f2ff; color: #000; border: none; padding: 12px; cursor: pointer; width: 100%; font-weight: bold; border-radius: 6px; margin-top: 10px; transition: 0.3s; }
+        button:hover { background: #fff; }
+        table { width: 100%; margin-top: 30px; border-collapse: collapse; font-size: 12px; }
+        th { text-align: left; color: #555; padding: 10px; border-bottom: 1px solid #222; }
+        td { padding: 10px; border-bottom: 1px solid #111; color: #eee; }
+        .status-msg { color: #f7931a; font-size: 11px; text-align: center; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
-    <h2>🛡️ AGENTE GUARDION ACTIVE</h2>
+    <h2 style="letter-spacing: 2px;">🛡️ PAINEL GUARDION ACTIVE</h2>
     
-    <div id="cards">
+    <div class="grid" id="cards">
         <div class="card">
-            <h3>MOD 01 (WBTC)</h3>
-            <p>POL: <span class="val" id="pol-MOD_01">...</span> | USDC: <span class="val" id="usdc-MOD_01">...</span></p>
-            <p>WBTC: <span class="val" id="wbtc-MOD_01">...</span></p>
-            <button onclick="swap('MOD_01')">CONVERTER PARA WBTC</button>
+            <h3>MÓDULO 01 (ESTRUTURA WBTC)</h3>
+            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_01">0.00</span></div>
+            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_01">0.00</span></div>
+            <div class="token-row"><span class="label">WBTC:</span> <span class="val" id="wbtc-MOD_01">0.00</span></div>
+            <button onclick="swap('MOD_01')">SWAP USDC ➔ WBTC</button>
         </div>
+
         <div class="card">
-            <h3>MOD 02 (USDT)</h3>
-            <p>POL: <span class="val" id="pol-MOD_02">...</span> | USDC: <span class="val" id="usdc-MOD_02">...</span></p>
-            <p>USDT: <span class="val" id="usdt-MOD_02">...</span></p>
-            <button onclick="swap('MOD_02')">CONVERTER PARA USDT</button>
+            <h3>MÓDULO 02 (ESTRUTURA USDT)</h3>
+            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_02">0.00</span></div>
+            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_02">0.00</span></div>
+            <div class="token-row"><span class="label">USDT:</span> <span class="val" id="usdt-MOD_02">0.00</span></div>
+            <button onclick="swap('MOD_02')">SWAP USDC ➔ USDT</button>
+        </div>
+
+        <div class="card">
+            <h3>MÓDULO 03 (DIVERSIFICAÇÃO)</h3>
+            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_03">0.00</span></div>
+            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_03">0.00</span></div>
+            <div class="token-row"><span class="label">MULTI-ATIVOS:</span> <span class="val" id="multi-status">ATIVO</span></div>
+            <button onclick="swap('MOD_03')" style="background: #8b5cf6; color: #fff;">DIVERSIFICAR AGORA</button>
         </div>
     </div>
 
-    <h3>📜 HISTÓRICO</h3>
+    <div id="status" class="status-msg">ENVIANDO ORDEM PARA O AGENTE...</div>
+
+    <h3 style="margin-top: 40px; border-left: 4px solid #00f2ff; padding-left: 10px;">📜 LOG DE TRANSAÇÕES</h3>
     <table>
-        <thead><tr><th>DATA</th><th>MOD</th><th>AÇÃO</th><th>HASH</th></tr></thead>
+        <thead><tr><th>HORA</th><th>MÓDULO</th><th>AÇÃO</th><th>HASH (BLOCKCHAIN)</th></tr></thead>
         <tbody id="hist"></tbody>
     </table>
 
     <script>
         async function load() {
-            const s = await (await fetch('/saldos')).json();
-            for (let m in s) {
-                for (let t in s[m]) {
-                    let el = document.getElementById(`${t}-${m}`);
-                    if(el) el.innerText = s[m][t];
+            try {
+                const s = await (await fetch('/saldos')).json();
+                for (let m in s) {
+                    for (let t in s[m]) {
+                        let el = document.getElementById(`${t}-${m}`);
+                        if(el) el.innerText = s[m][t];
+                    }
                 }
-            }
-            const h = await (await fetch('/historico')).json();
-            document.getElementById('hist').innerHTML = h.map(l => `
-                <tr><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td><td>${l[4].slice(0,10)}...</td></tr>
-            `).join('');
+                const h = await (await fetch('/historico')).json();
+                document.getElementById('hist').innerHTML = h.map(l => `
+                    <tr><td>${l[1]}</td><td><span style="color:#00f2ff">${l[2]}</span></td><td>${l[3]}</td><td style="color:#444">${l[4]}</td></tr>
+                `).join('');
+            } catch(e) { console.log("Erro ao carregar dados..."); }
         }
 
         async function swap(m) {
+            document.getElementById('status').style.display = 'block';
             await fetch('/converter', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({modulo: m})
             });
-            load();
+            setTimeout(() => {
+                document.getElementById('status').style.display = 'none';
+                load();
+            }, 2000);
         }
 
         setInterval(load, 5000);

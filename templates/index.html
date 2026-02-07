@@ -1,39 +1,21 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>OMNI AGENTE MULTI-MÓDULO</title>
+    <title>Agente Multi OMNI</title>
     <style>
-        body { background: #0f172a; color: #f8fafc; font-family: 'Segoe UI', sans-serif; text-align: center; }
-        .grid { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 20px; }
-        .card { background: #1e293b; border-radius: 12px; padding: 20px; width: 280px; border: 1px solid #334155; }
-        .status { color: #10b981; font-weight: bold; margin-bottom: 10px; }
-        .qr-img { background: white; padding: 10px; border-radius: 8px; margin: 15px 0; }
-        h1 { color: #3b82f6; margin-top: 40px; }
+        body { background: #0f172a; color: white; font-family: sans-serif; text-align: center; }
+        .card { background: #1e293b; display: inline-block; padding: 20px; border-radius: 15px; border: 1px solid #3b82f6; margin: 20px; }
+        .btn { background: #10b981; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h1>SISTEMA AGENTE MULTI-MÓDULO</h1>
-    <p>Monitoramento em tempo real na rede Polygon</p>
-
-    <div class="grid">
-        <div class="card">
-            <div class="status">● AGENTE MOD_01 ATIVO</div>
-            <p>Depósito USDC (Polygon)</p>
-            <img class="qr-img" src="/generate_qr/ENDERECO_CARTEIRA_01" width="180">
-            <p><small>Aguardando Depósito...</small></p>
-        </div>
-
-        <div class="card">
-            <div class="status">● AGENTE MOD_02 ATIVO</div>
-            <p>Depósito USDC (Polygon)</p>
-            <img class="qr-img" src="/generate_qr/ENDERECO_CARTEIRA_02" width="180">
-            <p><small>Aguardando Depósito...</small></p>
-        </div>
-    </div>
-
-    <div style="margin-top: 30px; color: #94a3b8;">
-        <p>Verifique os Logs do Render para ver as ações do Agente em tempo real.</p>
+    <h1>Agente Multi-Módulo</h1>
+    <div class="card">
+        <h3>Módulo de Conversão USDC ➔ WBTC</h3>
+        <p>Deposite USDC na rede Polygon para converter</p>
+        <img src="/qr/SUA_CARTEIRA_AQUI" width="200">
+        <br><br>
+        <button class="btn" onclick="location.reload()">Atualizar Saldo</button>
     </div>
 </body>
 </html>

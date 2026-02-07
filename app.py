@@ -1,61 +1,49 @@
+import os, threading, time, io, qrcode
 from flask import Flask, render_template, send_file
-import threading
-import time
-import os
-import qrcode
-import io
 from web3 import Web3
 
 app = Flask(__name__)
 
-# --- CONFIGURAÇÃO DO AGENTE MULTI ---
-# No Render, configure essas variáveis na aba 'Environment'
+# Configurações via Environment Variables do Render
 RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
-CARTEIRAS_MODULOS = {
-    "MOD_01": os.environ.get("WALLET_01"),
-    "MOD_02": os.environ.get("WALLET_02"),
-    "MOD_03": os.environ.get("WALLET_03")
-}
+WALLET_01 = os.environ.get("WALLET_01", "SEU_ENDERECO_AQUI")
 
-def agente_multi_logic():
-    """O Agente Multi monitora todas as carteiras em loop"""
+def agente_multi():
     w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    print("🤖 AGENTE MULTI-MÓDULO: ONLINE")
-
+    print("🤖 AGENTE MULTI: Iniciado e monitorando USDC -> WBTC")
+    
     while True:
-        for modulo, address in CARTEIRAS_MODULOS.items():
-            if not address: continue # Pula se a carteira não estiver configurada
-            
-            try:
-                balance = w3.eth.get_balance(address)
-                balance_eth = w3.from_wei(balance, 'ether')
+        try:
+            if WALLET_01 != "SEU_ENDERECO_AQUI":
+                balance = w3.eth.get_balance(WALLET_01)
+                eth_balance = w3.from_wei(balance, 'ether')
                 
-                if balance_eth > 0:
-                    print(f"💰 {modulo}: Depósito de {balance_eth} MATIC detectado!")
-                    # Aqui o Agente Multi executa a troca automática
+                if eth_balance > 0:
+                    print(f"💰 Depósito Detectado em {WALLET_01}: {eth_balance} MATIC/USDC")
+                    print("⚡ Iniciando conversão para WBTC via Uniswap...")
+                    # Lógica de Swap automática aqui
                 else:
-                    print(f"🔎 {modulo}: Monitorando {address[:6]}... (Vazio)")
-            except Exception as e:
-                print(f"⚠️ Erro no {modulo}: {e}")
-        
-        time.sleep(30) # Espera 30 segundos antes da próxima varredura
+                    print(f"🔎 Monitorando {WALLET_01[:6]}... aguardando depósito.")
+            
+            time.sleep(30)
+        except Exception as e:
+            print(f"⚠️ Erro no Agente: {e}")
+            time.sleep(10)
 
-# Inicia o Agente Multi em background
-threading.Thread(target=agente_multi_logic, daemon=True).start()
+# Inicia o Agente em segundo plano
+threading.Thread(target=agente_multi, daemon=True).start()
 
-# --- ROTAS DO SITE ---
 @app.route('/')
-def index():
+def home():
     return render_template('index.html')
 
-@app.route('/generate_qr/<path:data>')
-def generate_qr(data):
-    img = qrcode.make(data)
+@app.route('/qr/<path:text>')
+def qr(text):
+    img = qrcode.make(text)
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=10000)

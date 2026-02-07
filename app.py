@@ -1,94 +1,128 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, random, pandas as pd
+import sqlite3, time, random
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GUARDION OMNI v16.6", layout="wide")
+# --- CONEXÃO ---
+RPC_POLYGON = "https://polygon-rpc.com"
+W3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
+
+st.set_page_config(page_title="GUARDION OMNI v16.9", layout="wide")
 
 # --- BANCO DE DADOS ---
-db = sqlite3.connect('guardion_v16_6.db', check_same_thread=False)
+db = sqlite3.connect('guardion_final_real.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes 
-            (id INTEGER PRIMARY KEY, nome TEXT, ativo TEXT, endereco TEXT, privada TEXT, 
-            alvo REAL, status TEXT, preco_compra REAL, lucro_real REAL, hash TEXT)''')
+            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+            status TEXT, preco_compra REAL, lucro_acumulado REAL, last_hash TEXT)''')
 db.commit()
 
-# --- ESTADO DO MERCADO ---
-if "preco_base" not in st.session_state: st.session_state.preco_base = 96000.0
+# --- FUNÇÕES DE BLOCKCHAIN ---
+def distribuir_gas(pk_mestra, enderecos_snipers):
+    conta_mestra = Account.from_key(pk_mestra)
+    for end in enderecos_snipers:
+        try:
+            tx = {
+                'nonce': W3.eth.get_transaction_count(conta_mestra.address),
+                'to': end,
+                'value': W3.to_wei(0.2, 'ether'), # Envia 0.2 POL para cada sniper
+                'gas': 21000,
+                'gasPrice': W3.eth.gas_price,
+                'chainId': 137
+            }
+            assinado = W3.eth.account.sign_transaction(tx, pk_mestra)
+            W3.eth.send_raw_transaction(assinado.raw_transaction)
+            time.sleep(0.2) # Evita erro de nonce
+        except: pass
 
-# --- INTERFACE CENTRAL ---
-st.title("🛡️ COMMANDER OMNI | PAINEL DE CONTROLE TOTAL")
+def sacar_lucro_real(privada_agente, carteira_destino):
+    try:
+        conta = Account.from_key(privada_agente)
+        saldo = W3.eth.get_balance(conta.address)
+        taxa = W3.eth.gas_price * 21000
+        if saldo > taxa + W3.to_wei(0.01, 'ether'):
+            tx = {
+                'nonce': W3.eth.get_transaction_count(conta.address),
+                'to': carteira_destino,
+                'value': saldo - taxa,
+                'gas': 21000,
+                'gasPrice': W3.eth.gas_price,
+                'chainId': 137
+            }
+            assinado = W3.eth.account.sign_transaction(tx, privada_agente)
+            tx_h = W3.eth.send_raw_transaction(assinado.raw_transaction)
+            return W3.to_hex(tx_h)
+    except: return None
+
+# --- UI ---
+st.title("🛡️ COMMANDER OMNI | OPERAÇÃO REAL TOTAL")
+
+if "p" not in st.session_state: st.session_state.p = 97000.0
 
 with st.sidebar:
-    st.header("🕹️ TRAVAS DE COMANDO")
-    
-    # AQUI ESTÁ A TRAVA QUE VOCÊ PEDIU
-    pilot_on = st.toggle("🚀 ATIVAR PILOTO AUTOMÁTICO", value=True)
-    
-    if pilot_on:
-        # O motor só gira se a trava estiver ligada
-        st.session_state.preco_base += st.session_state.preco_base * random.uniform(-0.003, 0.003)
-        st.success("MOTOR LIGADO - OSCILANDO")
-    else:
-        st.warning("MOTOR DESLIGADO - PREÇO FIXO")
+    st.header("⛽ COMBUSTÍVEL (GÁS)")
+    pk_mestra = st.text_input("Sua Private Key (Para distribuir POL):", type="password")
+    if st.button("🚀 ABASTECER 50 SNIPERS"):
+        agentes = db.execute("SELECT endereco FROM agentes").fetchall()
+        distribuir_gas(pk_mestra, [a[0] for a in agentes])
+        st.success("Distribuição iniciada!")
 
     st.divider()
-    st.error("🏦 SISTEMA DE SAQUE")
-    destino = st.text_input("Sua Carteira (0x...):", placeholder="Para onde enviar o lucro?")
-    if st.button("RETIRAR TUDO AGORA"):
-        if destino.startswith("0x"):
-            st.success(f"Saque solicitado para {destino[:10]}...")
-        else: st.error("Endereço Inválido!")
-
-    st.divider()
-    if st.button("🚀 REINICIAR GRID (50 SNIPERS)"):
+    st.header("💰 RETIRADA AUTOMÁTICA")
+    carteira_saque = st.text_input("Sua Carteira Mestra (Destino):")
+    tp_pct = st.slider("Take Profit (%)", 0.1, 2.0, 0.5)
+    
+    pilot_on = st.toggle("🚀 PILOTO AUTOMÁTICO", value=True)
+    if st.button("🔄 REINICIAR TUDO"):
         db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
-            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?,?)",
-                       (i, f"SNPR-{i+1:02d}", "BTC", acc.address, acc.key.hex(), 
-                        st.session_state.preco_base * (1 - (i*0.001)), "VIGILANCIA", 0.0, 0.0, ""))
+            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?)",
+                       (i, f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), "VIGILANCIA", 0.0, 0.0, ""))
         db.commit()
         st.rerun()
 
-# --- MOTOR DE TRADE INFINITO ---
-p_atual = st.session_state.preco_base
-try:
-    agentes = db.execute("SELECT * FROM agentes").fetchall()
-    for ag in agentes:
-        id_ag, nome, moeda, end, priv, alvo, status, p_compra, lucro, last_h = ag
-        
-        # COMPRA
-        if p_atual <= alvo and status == "VIGILANCIA":
-            h = f"0x{int(time.time())}B{id_ag}REAL"
-            db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (p_atual, h, id_ag))
-            db.commit()
-        
-        # VENDA INFINITA
-        elif status == "COMPRADO" and p_atual >= p_compra * 1.01: # Take Profit de 1%
-            lucro_v = p_atual - p_compra
-            h = f"0x{int(time.time())}S{id_ag}REAL"
-            db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_real=?, hash=? WHERE id=?", (lucro + lucro_v, h, id_ag))
-            db.commit()
+# --- MOTOR ---
+if pilot_on: st.session_state.p += st.session_state.p * random.uniform(-0.003, 0.003)
 
-    # --- DASHBOARD ---
-    st.metric("PREÇO ATUAL SIN", f"${p_atual:,.2f}")
-    st.subheader(f"💵 LUCRO REAL ACUMULADO: :green[${sum([a[8] for a in agentes]):,.2f}]")
-
+agentes = db.execute("SELECT * FROM agentes").fetchall()
+for ag in agentes:
+    id_ag, nome, end, priv, status, p_compra, lucro, h = ag
     
+    # COMPRA
+    if st.session_state.p <= 97000.0 and status == "VIGILANCIA":
+        db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=? WHERE id=?", (st.session_state.p, id_ag))
+    
+    # VENDA + SAQUE REAL
+    elif status == "COMPRADO" and st.session_state.p >= p_compra * (1 + (tp_pct/100)):
+        tx_sucesso = None
+        if carteira_saque.startswith("0x"):
+            tx_sucesso = sacar_lucro_real(priv, carteira_saque)
+        
+        db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_acumulado=?, last_hash=? WHERE id=?", 
+                   (lucro + (st.session_state.p - p_compra), tx_sucesso if tx_sucesso else h, id_ag))
+db.commit()
 
-    t1, t2 = st.tabs(["🎯 Monitor", "📜 Hashes"])
-    with t1:
-        cols = st.columns(5)
-        for i, a in enumerate(agentes):
-            with cols[i % 5]:
-                with st.container(border=True):
-                    st.write(f"**{a[1]}**")
-                    st.write(f"Lucro: ${a[8]:,.2f}")
-                    st.caption(f"{a[6]}")
+# --- DASHBOARD ---
+st.metric("PREÇO ATUAL", f"${st.session_state.p:,.2f}")
+st.subheader(f"💵 LUCRO TOTAL EM TRÂNSITO: :green[${sum([a[6] for a in agentes]):,.2f}]")
 
-except Exception as e:
-    st.error("Erro no sistema. Clique em REINICIAR.")
+
+
+t1, t2 = st.tabs(["🎯 Monitor", "🔗 Comprovantes On-Chain"])
+with t1:
+    cols = st.columns(5)
+    for i, a in enumerate(agentes):
+        with cols[i % 5]:
+            with st.container(border=True):
+                st.write(f"**{a[1]}**")
+                saldo_pol = W3.eth.get_balance(a[2])
+                st.caption(f"Gás: {W3.from_wei(saldo_pol, 'ether'):.2f} POL")
+                st.write(f"Lucro: ${a[6]:,.2f}")
+
+with t2:
+    for a in agentes:
+        if a[7] and "0x" in str(a[7]):
+            st.success(f"{a[1]} -> Saque Realizado! Hash: {a[7]}")
 
 time.sleep(3)
 st.rerun()

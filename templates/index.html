@@ -1,439 +1,116 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OMNI v78 - Dashboard com Bot Sniper</title>
+    <title>PAINEL GUARDION | OMNI AGENT</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        :root { --bg: #020617; --card: #0f172a; --accent: #3b82f6; --text: #f1f5f9; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
+        .logo { font-size: 24px; font-weight: 800; color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+        .card { background: var(--card); border: 1px solid #1e293b; border-radius: 16px; padding: 20px; position: relative; }
+        .card h2 { margin-top: 0; color: var(--accent); font-size: 18px; border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
+        .label { font-size: 12px; font-weight: bold; background: #1e293b; padding: 4px 8px; border-radius: 6px; color: #94a3b8; margin-bottom: 15px; display: inline-block; }
         
-        body {
-            background: #000;
-            color: #eee;
-            font-family: 'Arial', sans-serif;
-            padding: 20px;
-        }
+        .saldos-box { margin: 15px 0; font-family: monospace; }
+        .saldo-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #1e293b; }
+        .val { font-weight: bold; color: #10b981; }
+
+        .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; margin-top: 15px; }
+        .btn-wbtc { background: #f7931a; color: white; }
+        .btn-usdt { background: #26a17b; color: white; }
+        .btn-multi { background: #6366f1; color: white; }
+        .btn:hover { opacity: 0.8; transform: translateY(-2px); }
         
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #f3ba2f;
-            padding-bottom: 20px;
-        }
-        
-        h1 {
-            color: #f3ba2f;
-            font-size: 36px;
-            letter-spacing: 2px;
-            margin-bottom: 10px;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: auto;
-        }
-        
-        .bot-control-panel {
-            background: #0a0a0a;
-            border: 2px solid #f3ba2f;
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 30px;
-            box-shadow: 0 0 20px rgba(243, 186, 47, 0.2);
-        }
-        
-        .bot-control-panel h2 {
-            color: #f3ba2f;
-            margin-bottom: 20px;
-            font-size: 20px;
-        }
-        
-        .control-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-        }
-        
-        .control-item {
-            background: #111;
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid #333;
-        }
-        
-        .control-item label {
-            display: block;
-            font-size: 12px;
-            text-transform: uppercase;
-            color: #888;
-            margin-bottom: 10px;
-        }
-        
-        .btn-group {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .btn {
-            flex: 1;
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            font-weight: bold;
-            cursor: pointer;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.3s;
-        }
-        
-        .btn-on {
-            background: #00ff00;
-            color: #000;
-        }
-        
-        .btn-on:hover {
-            background: #00dd00;
-            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
-        }
-        
-        .btn-off {
-            background: #ff4444;
-            color: white;
-        }
-        
-        .btn-off:hover {
-            background: #dd0000;
-            box-shadow: 0 0 15px rgba(255, 68, 68, 0.5);
-        }
-        
-        .btn-yes {
-            background: #007bff;
-            color: white;
-        }
-        
-        .btn-yes:hover {
-            background: #0056b3;
-        }
-        
-        .btn-no {
-            background: #ff9800;
-            color: white;
-        }
-        
-        .btn-no:hover {
-            background: #e68900;
-        }
-        
-        .status-display {
-            background: #111;
-            padding: 15px;
-            border-radius: 10px;
-            border-left: 4px solid #f3ba2f;
-        }
-        
-        .status-display p {
-            margin: 5px 0;
-            font-size: 14px;
-        }
-        
-        .status-label {
-            color: #888;
-            font-size: 12px;
-            text-transform: uppercase;
-        }
-        
-        .status-value {
-            color: #f3ba2f;
-            font-weight: bold;
-            font-size: 16px;
-        }
-        
-        .modules-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .card {
-            background: #0a0a0a;
-            border: 2px solid #333;
-            border-radius: 15px;
-            padding: 25px;
-            transition: all 0.3s;
-        }
-        
-        .card:hover {
-            border-color: #f3ba2f;
-            box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
-        }
-        
-        .card h3 {
-            color: #f3ba2f;
-            margin-bottom: 5px;
-            font-size: 16px;
-            text-transform: uppercase;
-        }
-        
-        .card .descricao {
-            color: #888;
-            font-size: 12px;
-            margin-bottom: 15px;
-        }
-        
-        .balance-box {
-            background: #111;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            font-size: 13px;
-            line-height: 2;
-        }
-        
-        .balance-box div {
-            display: flex;
-            justify-content: space-between;
-            padding: 5px 0;
-            border-bottom: 1px solid #222;
-        }
-        
-        .balance-box span {
-            color: #00ff00;
-            font-weight: bold;
-        }
-        
-        .qr-box {
-            text-align: center;
-            margin: 15px 0;
-            padding: 15px;
-            background: #111;
-            border-radius: 10px;
-        }
-        
-        .qr-box img {
-            max-width: 120px;
-            border: 2px solid #f3ba2f;
-            padding: 5px;
-            border-radius: 5px;
-        }
-        
-        .btn-converter {
-            width: 100%;
-            padding: 12px;
-            background: #f3ba2f;
-            color: #000;
-            border: none;
-            border-radius: 5px;
-            font-weight: bold;
-            cursor: pointer;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 10px;
-        }
-        
-        .btn-converter:hover {
-            background: #ffcc00;
-            box-shadow: 0 0 15px rgba(243, 186, 47, 0.5);
-        }
-        
-        .status-area {
-            padding: 10px;
-            background: #111;
-            border-radius: 5px;
-            font-size: 12px;
-            min-height: 30px;
-            color: #888;
-            border-left: 3px solid #f3ba2f;
-        }
-        
-        .footer {
-            text-align: center;
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #333;
-        }
-        
-        .footer a {
-            color: #f3ba2f;
-            text-decoration: none;
-            margin: 0 15px;
-            font-size: 12px;
-        }
-        
-        .footer a:hover {
-            text-decoration: underline;
-        }
-        
-        @media (max-width: 768px) {
-            .modules-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .control-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            h1 {
-                font-size: 24px;
-            }
-        }
+        .logout { color: #ef4444; text-decoration: none; font-weight: bold; }
+        #status-global { padding: 10px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; color: var(--accent); margin-bottom: 20px; display: none; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>OMNI v78</h1>
-        <div>Dashboard Integrado: Módulos + Bot Sniper Polymarket</div>
+
+<header>
+    <div class="logo">🛡️ GUARDION OMNI</div>
+    <a href="/logout" class="logout">SAIR DO SISTEMA</a>
+</header>
+
+<div id="status-global"></div>
+
+<div class="grid">
+    <div class="card" id="card-MOD_01">
+        <span class="label">ESTRATÉGIA: ACÚMULO DE BITCOIN</span>
+        <h2>MÓDULO 01 (WBTC)</h2>
+        <div class="saldos-box">
+            <div class="saldo-item"><span>USDC:</span> <span class="val" id="usdc-MOD_01">0.00</span></div>
+            <div class="saldo-item"><span>WBTC:</span> <span class="val" id="wbtc-MOD_01">0.00</span></div>
+            <div class="saldo-item"><span>POL (GAS):</span> <span class="val" id="pol-MOD_01">0.00</span></div>
+        </div>
+        <button class="btn btn-wbtc" onclick="executar('MOD_01')">CONVERTER USDC ➔ WBTC</button>
     </div>
-    
-    <div class="container">
-        <!-- PAINEL DE CONTROLE DO BOT -->
-        <div class="bot-control-panel">
-            <h2>🤖 Controle do Bot Sniper</h2>
-            <div class="control-grid">
-                <div class="control-item">
-                    <label>Status do Bot</label>
-                    <div class="btn-group">
-                        <button class="btn btn-on" onclick="toggleBot('ON')">⚡ LIGAR</button>
-                        <button class="btn btn-off" onclick="toggleBot('OFF')">⏹️ DESLIGAR</button>
-                    </div>
-                </div>
-                
-                <div class="control-item">
-                    <label>Preferência de Operação</label>
-                    <div class="btn-group">
-                        <button class="btn btn-yes" onclick="setPreference('YES')">📈 YES</button>
-                        <button class="btn btn-no" onclick="setPreference('NO')">📉 NO</button>
-                    </div>
-                </div>
-                
-                <div class="status-display">
-                    <p><span class="status-label">Status Atual:</span></p>
-                    <p><span class="status-value" id="bot-status">{{ bot_config.status }}</span></p>
-                    <p style="margin-top: 10px;"><span class="status-label">Preferência:</span></p>
-                    <p><span class="status-value" id="bot-preference">{{ bot_config.preference }}</span></p>
-                </div>
-            </div>
+
+    <div class="card" id="card-MOD_02">
+        <span class="label">ESTRATÉGIA: DOLARIZAÇÃO</span>
+        <h2>MÓDULO 02 (USDT)</h2>
+        <div class="saldos-box">
+            <div class="saldo-item"><span>USDC:</span> <span class="val" id="usdc-MOD_02">0.00</span></div>
+            <div class="saldo-item"><span>USDT:</span> <span class="val" id="usdt-MOD_02">0.00</span></div>
+            <div class="saldo-item"><span>POL (GAS):</span> <span class="val" id="pol-MOD_02">0.00</span></div>
         </div>
-        
-        <!-- MÓDULOS DE CONVERSÃO -->
-        <h2 style="color: #f3ba2f; margin-bottom: 20px;">📊 Módulos de Conversão</h2>
-        <div class="modules-grid">
-            {% for mod in modulos %}
-            <div class="card">
-                <h3>{{ mod.nome_display }}</h3>
-                <div class="descricao">{{ mod.descricao }}</div>
-                
-                <div class="balance-box" id="balance-{{ mod.nome }}">
-                    {% for ativo in mod.ativos %}
-                    <div>
-                        <span>{{ ativo }}:</span>
-                        <span id="{{ ativo }}-{{ mod.nome }}">0.0</span>
-                    </div>
-                    {% endfor %}
-                </div>
-                
-                <div class="qr-box">
-                    <img src="/qr/{{ mod.wallet }}" alt="QR Code" width="120">
-                </div>
-                
-                <button class="btn-converter" onclick="executarConversao('{{ mod.nome }}')">
-                    🔄 CONVERTER AGORA
-                </button>
-                
-                <div id="status-{{ mod.nome }}" class="status-area">Aguardando...</div>
-            </div>
-            {% endfor %}
-        </div>
-        
-        <div class="footer">
-            <a href="/relatorio_pdf">📥 BAIXAR RELATÓRIO PDF</a>
-            <a href="/logout">🚪 SAIR</a>
-        </div>
+        <button class="btn btn-usdt" onclick="executar('MOD_02')">CONVERTER USDC ➔ USDT</button>
     </div>
-    
-    <script>
-        async function toggleBot(action) {
-            try {
-                const res = await fetch('/bot/toggle', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: action })
-                });
-                const data = await res.json();
-                document.getElementById('bot-status').innerText = data.status;
-            } catch (e) {
-                console.log("Erro ao alternar bot:", e);
+
+    <div class="card" id="card-MOD_03">
+        <span class="label">ESTRATÉGIA: DIVERSIFICAÇÃO</span>
+        <h2>MÓDULO 03 (MULTI)</h2>
+        <div class="saldos-box">
+            <div class="saldo-item"><span>USDC:</span> <span class="val" id="usdc-MOD_03">0.00</span></div>
+            <div class="saldo-item"><span>DIVERSIFICADO:</span> <span class="val" id="multi-MOD_03">SIM</span></div>
+            <div class="saldo-item"><span>POL (GAS):</span> <span class="val" id="pol-MOD_03">0.00</span></div>
+        </div>
+        <button class="btn btn-multi" onclick="executar('MOD_03')">DIVERSIFICAR CARTEIRA</button>
+    </div>
+</div>
+
+
+
+<script>
+    async function carregarSaldos() {
+        const response = await fetch('/saldos');
+        const dados = await response.json();
+        
+        for (const mod in dados) {
+            if (document.getElementById(`pol-${mod}`)) {
+                document.getElementById(`pol-${mod}`).innerText = dados[mod].pol;
+                document.getElementById(`usdc-${mod}`).innerText = dados[mod].usdc;
+                if (dados[mod].wbtc) document.getElementById(`wbtc-${mod}`).innerText = dados[mod].wbtc;
+                if (dados[mod].usdt) document.getElementById(`usdt-${mod}`).innerText = dados[mod].usdt;
             }
         }
-        
-        async function setPreference(pref) {
-            try {
-                const res = await fetch('/bot/preference', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ preference: pref })
-                });
-                const data = await res.json();
-                document.getElementById('bot-preference').innerText = data.preference;
-            } catch (e) {
-                console.log("Erro ao alterar preferência:", e);
-            }
+    }
+
+    async function executar(modulo) {
+        const status = document.getElementById('status-global');
+        status.style.display = 'block';
+        status.innerText = `⏳ Solicitando conversão para ${modulo}...`;
+
+        const response = await fetch('/converter', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({modulo: modulo})
+        });
+
+        const r = await response.json();
+        if (r.status === 'sucesso') {
+            status.innerText = `✅ ${r.msg} | Hash: ${r.hash.substring(0,15)}...`;
+            carregarSaldos();
+        } else {
+            status.innerText = `❌ Erro na operação.`;
         }
-        
-        async function atualizarSaldos() {
-            try {
-                const res = await fetch('/saldos');
-                const dados = await res.json();
-                
-                for (const [mod, saldos] of Object.entries(dados)) {
-                    for (const [ativo, valor] of Object.entries(saldos)) {
-                        const elem = document.getElementById(`${ativo}-${mod}`);
-                        if (elem) {
-                            elem.innerText = typeof valor === 'number' ? valor.toFixed(2) : valor;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.log("Erro ao atualizar saldos:", e);
-            }
-        }
-        
-        async function executarConversao(modulo) {
-            const status = document.getElementById('status-' + modulo);
-            const btn = event.target;
-            
-            status.innerText = "⏳ Processando conversão...";
-            status.style.color = "#f3ba2f";
-            btn.disabled = true;
-            
-            try {
-                const res = await fetch(`/converter/${modulo}`, { method: 'POST' });
-                const resultado = await res.json();
-                
-                status.innerText = `✅ ${resultado.mensagem}`;
-                status.style.color = "#00ff00";
-                
-                setTimeout(() => {
-                    status.innerText = "Aguardando...";
-                    status.style.color = "#888";
-                    btn.disabled = false;
-                }, 3000);
-            } catch (e) {
-                status.innerText = "❌ Erro na conversão";
-                status.style.color = "#ff4444";
-                btn.disabled = false;
-            }
-        }
-        
-        // Atualizar saldos a cada 8 segundos
-        setInterval(atualizarSaldos, 8000);
-        
-        // Atualizar na primeira carga
-        atualizarSaldos();
-    </script>
+    }
+
+    setInterval(carregarSaldos, 10000); // Atualiza a cada 10 segundos
+    carregarSaldos();
+</script>
 </body>
 </html>

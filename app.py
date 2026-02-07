@@ -4,41 +4,53 @@ from web3 import Web3
 
 app = Flask(__name__)
 
+# Configuração da Rede Polygon
+RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
 MODULOS = {
     "MOD_01": os.environ.get("WALLET_01", "0x..."),
     "MOD_02": os.environ.get("WALLET_02", "0x..."),
     "MOD_03": os.environ.get("WALLET_03", "0x...")
 }
 
-# Configuração de Contratos (Polygon)
-CONTRATOS = {
-    "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-    "WBTC": "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",
-    "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"
-}
-
 @app.route('/')
 def home():
     return render_template('index.html', modulos=MODULOS)
 
+@app.route('/saldos')
+def obter_saldos():
+    resumo = {}
+    for mod, addr in MODULOS.items():
+        try:
+            # Obtém saldo de POL (Matic) para o Gás
+            balance_wei = w3.eth.get_balance(addr)
+            balance_pol = round(w3.from_wei(balance_wei, 'ether'), 4)
+            resumo[mod] = f"{balance_pol} POL"
+        except:
+            resumo[mod] = "Erro"
+    return jsonify(resumo)
+
 @app.route('/converter', methods=['POST'])
 def converter():
-    dados = request.get_json()
-    mod = dados.get('modulo')
-    carteira = MODULOS.get(mod)
-    
-    # Lógica de decisão do Agente
-    if mod == "MOD_01":
-        msg = f"🤖 MOD_01: Iniciando troca USDC ➔ WBTC (Bitcoin)"
-    elif mod == "MOD_02":
-        msg = f"🤖 MOD_02: Iniciando troca USDC ➔ USDT (Tether)"
-    elif mod == "MOD_03":
-        msg = f"🤖 MOD_03: Diversificando em várias Cryptos (Portfólio)"
-    else:
-        msg = "Módulo desconhecido"
-
-    print(f"Comando executado: {msg} na carteira {carteira}")
-    return jsonify({"status": "sucesso", "msg": msg})
+    try:
+        dados = request.get_json()
+        mod = dados.get('modulo')
+        hash_tx = "0x" + os.urandom(32).hex() # Simula envio da TX
+        
+        mensagens = {
+            "MOD_01": "Conversão USDC ➔ WBTC",
+            "MOD_02": "Conversão USDC ➔ USDT",
+            "MOD_03": "Diversificação Ativa"
+        }
+        
+        return jsonify({
+            "status": "sucesso", 
+            "msg": mensagens.get(mod, "Operação"),
+            "hash": hash_tx
+        })
+    except Exception as e:
+        return jsonify({"status": "erro", "msg": str(e)}), 500
 
 @app.route('/qr/<path:text>')
 def qr(text):

@@ -6,9 +6,20 @@ import pandas as pd
 from datetime import datetime
 
 # --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="GUARDION OMNI v10.2", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v10.3", layout="wide")
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.publicnode.com"))
-PK_MESTRE = st.secrets.get("PK_MESTRE")
+
+# --- TRATAMENTO DOS SECRETS (LIMPEZA DE CHAVE) ---
+def carregar_pk():
+    pk = st.secrets.get("PK_MESTRE")
+    if pk:
+        pk = pk.strip() # Remove espaços acidentais
+        if not pk.startswith("0x") and len(pk) == 64:
+            pk = "0x" + pk
+        return pk
+    return None
+
+PK_MESTRE = carregar_pk()
 
 # --- BANCO DE DADOS ---
 def init_db():
@@ -36,103 +47,100 @@ def auto_abastecer(addr):
             }
             signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
             w3.eth.send_raw_transaction(signed.raw_transaction)
-            st.toast(f"🚀 Míssil de Gás enviado para {addr[:6]}", icon="⛽")
-    except: pass
+            st.toast(f"⛽ Gas enviado para {addr[:6]}", icon="🚀")
+    except Exception as e:
+        st.error(f"Erro no envio de gas: {e}")
 
 def get_price(coin):
     try:
         ids = {"WBTC": "bitcoin", "ETH": "ethereum"}
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids[coin]}&vs_currencies=usd"
-        return requests.get(url, timeout=5).json()[ids[coin]]['usd']
+        res = requests.get(url, timeout=5).json()
+        return res[ids[coin]]['usd']
     except: return None
 
-# --- INTERFACE ---
-st.title("🛡️ COMMANDER OMNI | SENTINEL v10.2")
+# --- INTERFACE DE COMANDO ---
+st.title("🛡️ COMMANDER OMNI | SENTINEL v10.3")
 
-# 1. MONITOR DA TESOURARIA MESTRE (OS SEUS 24 POL)
-if PK_MESTRE:
-    try:
-        addr_mestre = Account.from_key(PK_MESTRE).address
-        s_mestre_wei = w3.eth.get_balance(addr_mestre)
-        s_mestre_pol = round(w3.from_wei(s_mestre_wei, 'ether'), 2)
-        
-        col_t1, col_t2 = st.columns([1, 3])
-        with col_t1:
-            st.metric("💰 Saldo Wallet Mestre", f"{s_mestre_pol} POL")
-        
-        with col_t2:
+# --- 1. STATUS DA CONEXÃO MESTRE (DIAGNÓSTICO) ---
+with st.expander("🔐 Status da Chave Mestre", expanded=True):
+    if not PK_MESTRE:
+        st.error("❌ Variável 'PK_MESTRE' não encontrada nos Secrets do Streamlit.")
+        st.info("Dica: No Streamlit Cloud, vá em Settings > Secrets e adicione: PK_MESTRE = 'sua_chave'")
+    else:
+        try:
+            acc_mestre = Account.from_key(PK_MESTRE)
+            s_mestre_pol = round(w3.from_wei(w3.eth.get_balance(acc_mestre.address), 'ether'), 2)
+            st.success(f"✅ Wallet Mestre Conectada: {acc_mestre.address}")
+            
+            # Alerta de Saldo (Seus 24 POL)
+            c1, c2 = st.columns(2)
+            c1.metric("Saldo Tesouraria", f"{s_mestre_pol} POL")
             if s_mestre_pol < 2.0:
-                st.error(f"🚨 ALERTA CRÍTICO: Tesouraria com apenas {s_mestre_pol} POL! Recarregue a Wallet 01 urgentemente.")
-            elif s_mestre_pol < 5.0:
-                st.warning(f"⚠️ Atenção: Saldo de reserva a baixar ({s_mestre_pol} POL).")
-            else:
-                st.success(f"✅ Logística Operacional: {s_mestre_pol} POL disponíveis para abastecimento.")
-    except:
-        st.error("❌ Erro ao aceder à Wallet Mestre. Verifique a sua PK_MESTRE nos Secrets.")
+                st.error("🚨 SALDO CRÍTICO NA MESTRE!")
+            elif s_mestre_pol < 12.5:
+                st.warning("⚠️ Saldo insuficiente para abastecer 25 agentes (precisa de 12.5 POL).")
+        except Exception as e:
+            st.error(f"❌ Chave Inválida: O formato da PK_MESTRE nos Secrets está incorreto.")
+            st.code(f"Erro técnico: {e}")
 
 st.divider()
 
+# --- RESTANTE DO APP (FÁBRICA E MONITORES) ---
 agentes = db.execute("SELECT * FROM modulos").fetchall()
 
-# Sidebar: Fábrica de Grid
 with st.sidebar:
     st.header("🏭 Fábrica de Grid")
     qtd = st.select_slider("Soldados:", options=[1, 5, 10, 25, 50], value=25)
     ativo = st.selectbox("Ativo", ["WBTC", "ETH"])
-    p_topo = st.number_input("Preço Inicial (Topo):", value=102500.0)
+    p_topo = st.number_input("Preço Inicial:", value=102500.0)
     dist = st.number_input("Distância ($):", value=200.0)
     
-    if st.button(f"🚀 LANÇAR REDE DE {qtd} AGENTES"):
-        novos = []
-        for i in range(qtd):
-            acc = Account.create()
-            p_alvo = p_topo - (i * dist)
-            novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), ativo, p_alvo, 
-                          0.0, 10.0, 5.0, "VIGILANCIA", f"Vigiando em ${p_alvo}", 
-                          datetime.now().strftime("%H:%M")))
-        db.executemany("INSERT INTO modulos (nome, endereco, privada, alvo, preco_gatilho, preco_compra, lucro_esperado, stop_loss, status, ultima_acao, data_criacao) VALUES (?,?,?,?,?,?,?,?,?,?,?)", novos)
-        db.commit()
-        st.success(f"Rede lançada com sucesso!")
-        st.rerun()
+    if st.button(f"🚀 LANÇAR {qtd} AGENTES"):
+        if not PK_MESTRE:
+            st.error("Impossível lançar sem PK_MESTRE.")
+        else:
+            novos = []
+            for i in range(qtd):
+                acc = Account.create()
+                p_alvo = p_topo - (i * dist)
+                novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), ativo, p_alvo, 
+                              0.0, 10.0, 5.0, "VIGILANCIA", f"Alvo: ${p_alvo}", 
+                              datetime.now().strftime("%H:%M")))
+            db.executemany("INSERT INTO modulos (nome, endereco, privada, alvo, preco_gatilho, preco_compra, lucro_esperado, stop_loss, status, ultima_acao, data_criacao) VALUES (?,?,?,?,?,?,?,?,?,?,?)", novos)
+            db.commit()
+            st.rerun()
 
-    if st.button("🧹 RESET TOTAL DO QG"):
+    if st.button("🧹 RESET TOTAL"):
         db.execute("DELETE FROM modulos")
         db.commit()
         st.rerun()
 
-# Painel de Controle dos Agentes
 if agentes:
-    st.subheader("⛽ Monitor de Tanque dos Agentes")
+    st.subheader("⛽ Tanques do Batalhão")
     cols = st.columns(4)
     for idx, ag in enumerate(agentes):
         with cols[idx % 4]:
             with st.container(border=True):
                 try:
-                    s_wei = w3.eth.get_balance(ag[2])
-                    s_pol = round(w3.from_wei(s_wei, 'ether'), 3)
+                    s_pol = round(w3.from_wei(w3.eth.get_balance(ag[2]), 'ether'), 3)
                 except: s_pol = 0.0
-                
                 st.write(f"**{ag[1]}**")
                 st.progress(min(s_pol / 0.5, 1.0))
-                st.caption(f"Saldo: {s_pol} POL | Alvo: ${ag[5]}")
-                
-                if ag[9] == "VIGILANCIA":
-                    auto_abastecer(ag[2])
+                st.caption(f"{s_pol} POL | ${ag[5]}")
+                if ag[9] == "VIGILANCIA": auto_abastecer(ag[2])
 
     st.divider()
-    st.subheader("🎯 Monitor de Mercado")
     preco_v = get_price(agentes[0][4])
-    st.info(f"Cotação Atual {agentes[0][4]}: **${preco_v}**")
+    st.metric(f"Preço Atual {agentes[0][4]}", f"${preco_v}")
     
-    # Lógica de Gatilho de Compra
     for ag in agentes:
         if ag[9] == "VIGILANCIA" and preco_v and preco_v <= ag[5]:
             db.execute("UPDATE modulos SET status='POSICIONADO', preco_compra=?, ultima_acao='COMPRADO' WHERE id=?", (preco_v, ag[0]))
             db.commit()
             st.rerun()
-
 else:
-    st.info("Aguardando ordem de lançamento na barra lateral.")
+    st.info("Aguardando ordem de lançamento.")
 
 time.sleep(60)
 st.rerun()

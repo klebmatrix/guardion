@@ -3,65 +3,87 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, requests, datetime
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="GUARDION OMNI v14.3 REAL", layout="wide")
+# --- 1. CONFIGURAÇÕES TÉCNICAS ---
+st.set_page_config(page_title="GUARDION OMNI v15.0", layout="wide")
 
-# --- 2. BANCO DE DADOS ---
-db = sqlite3.connect('guardion_real_v14.db', check_same_thread=False)
+# Inicialização do Banco de Dados
+db = sqlite3.connect('guardion_real_v15.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes 
                 (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
                 alvo REAL, status TEXT, preco_compra REAL, hash TEXT)''')
 db.commit()
 
+# Carregar agentes globalmente para evitar NameError
 agentes = db.execute("SELECT * FROM agentes").fetchall()
 
-# --- 3. LOGIN ---
+# --- 2. ACESSO ---
 if "logado" not in st.session_state: st.session_state.logado = False
 if not st.session_state.logado:
-    senha_mestre = st.secrets.get("SECRET_KEY", "mestre2026")
-    st.title("🔐 ACESSO AO QG REAL")
-    senha_digitada = st.text_input("Senha de Comando:", type="password")
-    if st.button("ENTRAR"):
-        if senha_digitada == senha_mestre:
+    st.title("🛡️ QG GUARDION REAL")
+    senha = st.text_input("Chave Mestre:", type="password")
+    if st.button("DESBLOQUEAR"):
+        if senha == st.secrets.get("SECRET_KEY", "mestre2026"):
             st.session_state.logado = True
             st.rerun()
     st.stop()
 
-# --- 4. CONEXÃO RPC & FUNÇÕES BLOCKCHAIN ---
+# --- 3. CONEXÃO BLOCKCHAIN ---
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
 def pegar_preco_btc():
     try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
-        return float(r.json()['price'])
+        return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
     except: return None
 
-def executar_compra_na_rede(privada_agente):
+# ABASTECIMENTO COM GESTÃO DE NONCE REAL
+def abastecer_agentes(pk_mestre):
+    try:
+        mestre_acc = Account.from_key(pk_mestre)
+        alvo_agentes = db.execute("SELECT endereco FROM agentes LIMIT 10").fetchall()
+        
+        # Pega o nonce atualizado direto da rede
+        current_nonce = w3.eth.get_transaction_count(mestre_acc.address)
+        
+        for ag in alvo_agentes:
+            tx = {
+                'nonce': current_nonce,
+                'to': ag[0],
+                'value': w3.to_wei(0.5, 'ether'),
+                'gas': 21000,
+                'gasPrice': int(w3.eth.gas_price * 1.3), # Taxa prioritária
+                'chainId': 137
+            }
+            signed = w3.eth.account.sign_transaction(tx, pk_mestre)
+            w3.eth.send_raw_transaction(signed.raw_transaction)
+            current_nonce += 1 # Incrementa para a próxima transação
+            time.sleep(1) 
+        return True
+    except Exception as e:
+        st.sidebar.error(f"Erro: {str(e)}")
+        return False
+
+# COMPRA REAL (GERA SHS)
+def operacao_real(privada_agente):
     try:
         acc = Account.from_key(privada_agente)
-        saldo = w3.eth.get_balance(acc.address)
-        if saldo < w3.to_wei(0.001, 'ether'): return "ERRO: SEM POL (GAS)"
+        if w3.eth.get_balance(acc.address) < w3.to_wei(0.005, 'ether'):
+            return "SEM_GAS"
         
-        tx = {'nonce': w3.eth.get_transaction_count(acc.address), 'to': acc.address, 'value': 0, 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
+        tx = {
+            'nonce': w3.eth.get_transaction_count(acc.address),
+            'to': acc.address,
+            'value': 0,
+            'gas': 21000,
+            'gasPrice': w3.eth.gas_price,
+            'chainId': 137
+        }
         signed = w3.eth.account.sign_transaction(tx, privada_agente)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
         return w3.to_hex(tx_hash)
-    except Exception as e: return f"FALHA: {str(e)[:10]}"
+    except: return "ERRO_REDE"
 
-def abastecer_agentes(pk_mestre):
-    try:
-        mestre = Account.from_key(pk_mestre)
-        agentes_alvo = db.execute("SELECT endereco FROM agentes LIMIT 10").fetchall()
-        for ag in agentes_alvo:
-            tx = {'nonce': w3.eth.get_transaction_count(mestre.address), 'to': ag[0], 'value': w3.to_wei(0.5, 'ether'), 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
-            signed = w3.eth.account.sign_transaction(tx, pk_mestre)
-            w3.eth.send_raw_transaction(signed.raw_transaction)
-            time.sleep(1.5)
-        return True
-    except: return False
-
-# --- 5. INTERFACE ---
-st.title("🛡️ COMMANDER OMNI | v14.3")
+# --- 4. INTERFACE ---
+st.title("🛡️ COMMANDER OMNI v15.0")
 btc = pegar_preco_btc()
 
 if btc:
@@ -69,16 +91,18 @@ if btc:
     for ag in agentes:
         id_b, nome, addr, priv, alvo, status, p_compra, tx_h = ag
         if status == "VIGILANCIA" and btc <= alvo:
-            shs = executar_compra_na_rede(priv)
+            shs = operacao_real(priv)
             if shs.startswith("0x"):
                 db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (btc, shs, id_b))
                 db.commit()
-                st.toast(f"✅ {nome} disparou na rede!")
+                st.toast(f"✅ {nome} COMPROU!")
 
-# --- 6. SIDEBAR ---
+# --- 5. COMANDOS ---
 with st.sidebar:
-    pk_m = st.text_input("PK_01 (Mestre):", type="password")
-    if st.button("🚀 LANÇAR 50 SNIPERS"):
+    st.header("⚙️ COMANDO CENTRAL")
+    pk_m = st.text_input("PK_01 Mestre:", type="password")
+    
+    if st.button("🚀 GERAR NOVO BATALHÃO"):
         db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
@@ -87,27 +111,30 @@ with st.sidebar:
                        (f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), alvo_calc, "VIGILANCIA", "---"))
         db.commit()
         st.rerun()
-    if st.button("⛽ ABASTECER (0.5 POL)"):
-        if abastecer_agentes(pk_m): st.success("Abastecidos!")
-        else: st.error("Falha no envio")
 
-# --- 7. VISUALIZAÇÃO (CORRIGIDA PARA 2026) ---
-tab1, tab2 = st.tabs(["🎯 GRID", "📄 LOGS (SHS/HASH)"])
-with tab1:
+    if st.button("⛽ ABASTECER (0.5 POL)"):
+        if abastecer_agentes(pk_m): st.success("Abastecimento em curso!")
+        else: st.error("Falha no envio.")
+
+# --- 6. PAINEL ---
+t1, t2 = st.tabs(["🎯 GRID DE CAMPO", "📄 LOGS & SHS"])
+
+with t1:
     if agentes:
         cols = st.columns(5)
         for idx, ag in enumerate(agentes):
             with cols[idx % 5]:
                 with st.container(border=True):
                     st.write(f"**{ag[1]}**")
-                    if "0x" in str(ag[7]): st.success("EXECUTADO")
+                    if "0x" in str(ag[7]): st.success("REALIZADO")
+                    elif ag[7] == "SEM_GAS": st.warning("FALTA POL")
                     else: st.info(f"🎯 ${ag[4]:,.0f}")
-with tab2:
+
+with t2:
     if agentes:
         import pandas as pd
-        df = pd.DataFrame(agentes, columns=['ID','Nome','Carteira','Privada','Alvo','Status','Preço','Hash'])
-        df['Ver no Scan'] = df['Hash'].apply(lambda x: f"https://polygonscan.com/tx/{x}" if x.startswith('0x') else x)
-        # CORREÇÃO AQUI: width='stretch' substitui use_container_width=True
-        st.dataframe(df[['Nome', 'Status', 'Ver no Scan', 'Carteira']], width='stretch')
+        df = pd.DataFrame(agentes, columns=['ID','Nome','Endereço','Privada','Alvo','Status','Preço','Hash'])
+        df['PolygonScan'] = df['Hash'].apply(lambda x: f"https://polygonscan.com/tx/{x}" if x.startswith('0x') else x)
+        st.dataframe(df[['Nome', 'Status', 'Alvo', 'PolygonScan', 'Endereço']], width='stretch')
 
 time.sleep(20); st.rerun()

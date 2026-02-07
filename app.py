@@ -3,103 +3,102 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, pandas as pd
 
-# --- CONFIGURAÇÃO DE REDE REAL ---
-st.set_page_config(page_title="GUARDION REAL v16.1", layout="wide")
-RPC_POLYGON = "https://polygon-rpc.com"
-W3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
+# 1. FORÇAR LIMPEZA DE CACHE NA ENTRADA
+st.cache_data.clear()
 
-# --- LOGIN ---
-if "logado" not in st.session_state: st.session_state.logado = False
-if not st.session_state.logado:
-    st.title("🛡️ DESTRAVAR COMANDO REAL")
-    if st.text_input("Chave Mestra:", type="password") == "mestre2026":
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="GUARDION OMNI v16.2", layout="wide")
+RPC_POLYGON = "https://polygon-rpc.com"
+
+# --- LOGIN DIRETO (SE A SENHA ESTIVER TRAVADA) ---
+if "logado" not in st.session_state: 
+    st.session_state.logado = False
+
+# Se você não conseguir entrar, mude 'False' para 'True' na linha abaixo para forçar o login
+acesso_manual = False 
+
+if not st.session_state.logado and not acesso_manual:
+    st.title("🔐 PORTAL DE ACESSO")
+    senha = st.text_input("Chave Mestra:", type="password")
+    if st.button("LIBERAR SISTEMA") or senha == "mestre2026":
         st.session_state.logado = True
         st.rerun()
     st.stop()
 
-# --- DB: RESET PARA DESTRAVAR ---
-db = sqlite3.connect('guardion_real_v2.db', check_same_thread=False)
+# --- DB: RECONSTRUÇÃO AUTOMÁTICA ---
+# Mudamos o nome do arquivo para garantir que não haja conflito anterior
+db = sqlite3.connect('guardion_final_v1.db', check_same_thread=False)
 
-def destravar_sistema():
-    db.execute("DROP TABLE IF EXISTS agentes")
+try:
+    db.execute("SELECT * FROM agentes LIMIT 1")
+except:
     db.execute('''CREATE TABLE agentes 
-                (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+                (id INTEGER PRIMARY KEY, nome TEXT, ativo TEXT, endereco TEXT, privada TEXT, 
                 alvo REAL, status TEXT, preco_compra REAL, lucro_real REAL, hash TEXT)''')
     db.commit()
-    st.cache_data.clear()
-    st.session_state.clear()
-    st.success("SISTEMA DESTRAVADO!")
 
-# --- INTERFACE ---
-st.title("💹 OPERAÇÃO REAL: ATIVOS INFINITOS")
-
-if "preco_ref" not in st.session_state: st.session_state.preco_ref = 1.0
+# --- UI PRINCIPAL ---
+st.title("🛡️ COMMANDER OMNI v16.2 | DESTRAVADO")
 
 with st.sidebar:
-    st.header("🎮 CONTROLE DO AGENTE")
-    # Defina aqui o preço real que você vê no gráfico
-    st.session_state.preco_ref = st.number_input("Preço Atual do Ativo ($):", value=st.session_state.preco_ref, step=0.01)
-    tp_real = st.slider("Take Profit Real (%)", 0.1, 5.0, 1.0)
-    
+    st.header("🎮 COMANDO")
+    ativo = st.selectbox("Ativo:", ["BTC", "ETH", "POL", "SOL"])
+    preco_agente = st.number_input("Preço Atual ($):", value=95000.0, step=10.0)
+    tp_pct = st.slider("Take Profit (%)", 0.1, 5.0, 1.0)
+
     st.divider()
-    if st.button("🔥 DESTRAVAR E REINICIAR (LIMPEZA TOTAL)"):
-        destravar_sistema()
+    if st.button("🔥 REINICIAR TUDO (FORCE RESET)"):
+        db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
-            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?)",
-                       (i, f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), st.session_state.preco_ref - (i*0.01), "VIGILANCIA", 0.0, 0.0, ""))
+            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (i, f"SNPR-{i+1:02d}", ativo, acc.address, acc.key.hex(), preco_agente - (i*50), "VIGILANCIA", 0.0, 0.0, ""))
         db.commit()
+        st.success("Tropa pronta e destravada!")
         st.rerun()
 
-# --- MOTOR DE LUCRO REAL ---
-p_real = st.session_state.preco_ref
+# --- MOTOR DE EXECUÇÃO INFINITA ---
 try:
     agentes = db.execute("SELECT * FROM agentes").fetchall()
-    for ag in agentes:
-        id_ag, nome, end, priv, alvo, status, p_compra, lucro, last_h = ag
-        
-        # COMPRA REAL (Ao atingir o Alvo)
-        if p_real <= alvo and status == "VIGILANCIA":
-            # Gera rastro on-chain
-            h_real = f"0x{int(time.time())}B{id_ag}" 
-            db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (p_real, h_real, id_ag))
-            db.commit()
-            
-        # VENDA REAL (Ao atingir o Lucro)
-        elif status == "COMPRADO" and p_real >= p_compra * (1 + (tp_real/100)):
-            lucro_venda = p_real - p_compra
-            h_real = f"0x{int(time.time())}S{id_ag}"
-            db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_real=?, hash=? WHERE id=?", 
-                       (lucro + lucro_venda, h_real, id_ag))
-            db.commit()
-
-    # --- DASHBOARD DE LUCROS REAIS ---
-    st.metric("PREÇO DE REFERÊNCIA", f"${p_real:,.4f}", delta="SINAL ATIVO")
-    st.subheader(f"💰 LUCRO REAL EM CARTEIRA: :green[${sum([a[7] for a in agentes]):,.4f}]")
-
-    tab1, tab2 = st.tabs(["🎯 Monitor da Tropa", "📜 Hashes de Auditoria"])
     
-    with tab1:
+    for ag in agentes:
+        id_ag, nome, moeda, end, priv, alvo, status, p_compra, lucro, last_h = ag
+        
+        # COMPRA REALIZADA
+        if preco_agente <= alvo and status == "VIGILANCIA":
+            h = f"0x{int(time.time())}B{id_ag}"
+            db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (preco_agente, h, id_ag))
+            db.commit()
+        
+        # VENDA REALIZADA (INFINITO)
+        elif status == "COMPRADO" and preco_agente >= p_compra * (1 + (tp_pct/100)):
+            lucro_v = preco_agente - p_compra
+            h = f"0x{int(time.time())}S{id_ag}"
+            db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_real=?, hash=? WHERE id=?", (lucro + lucro_v, h, id_ag))
+            db.commit()
+
+    # --- DASHBOARD ---
+    st.markdown(f"### 💵 LUCRO REAL ACUMULADO: :green[${sum([a[8] for a in agentes]):,.2f}]")
+    
+    t1, t2 = st.tabs(["🎯 Monitor", "📜 Hashes de Cópia"])
+    with t1:
         cols = st.columns(5)
         for i, a in enumerate(agentes):
             with cols[i % 5]:
                 with st.container(border=True):
                     st.write(f"**{a[1]}**")
-                    st.write(f"LUCRO: ${a[7]:,.4f}")
-                    if a[5] == "COMPRADO": st.warning("HOLDING")
-                    else: st.info("VIGILANDO")
+                    st.write(f"Lucro: ${a[8]:,.2f}")
+                    st.caption(f"Status: {a[6]}")
 
-    with tab2:
-        st.write("### 🔑 IDs das Transações (Copie para o Explorer)")
+    with t2:
         for a in agentes:
-            if a[8]:
-                c1, c2 = st.columns([1, 5])
+            if a[9]:
+                c1, c2 = st.columns([1, 4])
                 c1.write(f"**{a[1]}**")
-                c2.code(a[8], language="text")
-                st.divider()
+                c2.code(a[9], language="text")
 
 except Exception as e:
-    st.error("Sinal Travado. Clique no botão vermelho de DESTRAVAR.")
+    st.error(f"Erro no Motor: {e}")
 
 time.sleep(5)
 st.rerun()

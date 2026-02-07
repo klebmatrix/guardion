@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 
 # --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="GUARDION OMNI v10.0", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v10.2", layout="wide")
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.publicnode.com"))
 PK_MESTRE = st.secrets.get("PK_MESTRE")
 
@@ -27,7 +27,8 @@ def auto_abastecer(addr):
     if not PK_MESTRE: return
     try:
         acc_mestre = Account.from_key(PK_MESTRE)
-        if w3.eth.get_balance(addr) < w3.to_wei(0.1, 'ether'):
+        saldo_wei = w3.eth.get_balance(addr)
+        if saldo_wei < w3.to_wei(0.1, 'ether'):
             tx = {
                 'nonce': w3.eth.get_transaction_count(acc_mestre.address),
                 'to': addr, 'value': w3.to_wei(0.5, 'ether'),
@@ -35,7 +36,7 @@ def auto_abastecer(addr):
             }
             signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
             w3.eth.send_raw_transaction(signed.raw_transaction)
-            st.toast(f"⛽ Gas enviado: {addr[:6]}", icon="🚀")
+            st.toast(f"🚀 Míssil de Gás enviado para {addr[:6]}", icon="⛽")
     except: pass
 
 def get_price(coin):
@@ -45,13 +46,35 @@ def get_price(coin):
         return requests.get(url, timeout=5).json()[ids[coin]]['usd']
     except: return None
 
-# --- INTERFACE DE COMANDO ---
-st.title("🛡️ COMMANDER OMNI | GRID DASHBOARD")
+# --- INTERFACE ---
+st.title("🛡️ COMMANDER OMNI | SENTINEL v10.2")
 
-# Carregar Agentes
+# 1. MONITOR DA TESOURARIA MESTRE (OS SEUS 24 POL)
+if PK_MESTRE:
+    try:
+        addr_mestre = Account.from_key(PK_MESTRE).address
+        s_mestre_wei = w3.eth.get_balance(addr_mestre)
+        s_mestre_pol = round(w3.from_wei(s_mestre_wei, 'ether'), 2)
+        
+        col_t1, col_t2 = st.columns([1, 3])
+        with col_t1:
+            st.metric("💰 Saldo Wallet Mestre", f"{s_mestre_pol} POL")
+        
+        with col_t2:
+            if s_mestre_pol < 2.0:
+                st.error(f"🚨 ALERTA CRÍTICO: Tesouraria com apenas {s_mestre_pol} POL! Recarregue a Wallet 01 urgentemente.")
+            elif s_mestre_pol < 5.0:
+                st.warning(f"⚠️ Atenção: Saldo de reserva a baixar ({s_mestre_pol} POL).")
+            else:
+                st.success(f"✅ Logística Operacional: {s_mestre_pol} POL disponíveis para abastecimento.")
+    except:
+        st.error("❌ Erro ao aceder à Wallet Mestre. Verifique a sua PK_MESTRE nos Secrets.")
+
+st.divider()
+
 agentes = db.execute("SELECT * FROM modulos").fetchall()
 
-# Sidebar: Configuração da Rede
+# Sidebar: Fábrica de Grid
 with st.sidebar:
     st.header("🏭 Fábrica de Grid")
     qtd = st.select_slider("Soldados:", options=[1, 5, 10, 25, 50], value=25)
@@ -59,54 +82,57 @@ with st.sidebar:
     p_topo = st.number_input("Preço Inicial (Topo):", value=102500.0)
     dist = st.number_input("Distância ($):", value=200.0)
     
-    if st.button(f"🚀 LANÇAR {qtd} AGENTES"):
+    if st.button(f"🚀 LANÇAR REDE DE {qtd} AGENTES"):
         novos = []
         for i in range(qtd):
             acc = Account.create()
             p_alvo = p_topo - (i * dist)
             novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), ativo, p_alvo, 
-                          0.0, 10.0, 5.0, "VIGILANCIA", f"Aguardando ${p_alvo}", 
+                          0.0, 10.0, 5.0, "VIGILANCIA", f"Vigiando em ${p_alvo}", 
                           datetime.now().strftime("%H:%M")))
         db.executemany("INSERT INTO modulos (nome, endereco, privada, alvo, preco_gatilho, preco_compra, lucro_esperado, stop_loss, status, ultima_acao, data_criacao) VALUES (?,?,?,?,?,?,?,?,?,?,?)", novos)
         db.commit()
-        st.success("Rede Lançada!")
+        st.success(f"Rede lançada com sucesso!")
         st.rerun()
 
-    if st.button("🧹 LIMPAR QG"):
+    if st.button("🧹 RESET TOTAL DO QG"):
         db.execute("DELETE FROM modulos")
         db.commit()
         st.rerun()
 
-# Painel Principal
+# Painel de Controle dos Agentes
 if agentes:
-    # Gráfico do Grid
-    st.subheader("📊 Visualização da Rede de Captura")
-    vigi_df = pd.DataFrame([{"Agente": a[1], "Preço Gatilho": a[5]} for a in agentes if a[9] == "VIGILANCIA"])
-    if not vigi_df.empty:
-        st.line_chart(vigi_df.set_index("Agente"))
+    st.subheader("⛽ Monitor de Tanque dos Agentes")
+    cols = st.columns(4)
+    for idx, ag in enumerate(agentes):
+        with cols[idx % 4]:
+            with st.container(border=True):
+                try:
+                    s_wei = w3.eth.get_balance(ag[2])
+                    s_pol = round(w3.from_wei(s_wei, 'ether'), 3)
+                except: s_pol = 0.0
+                
+                st.write(f"**{ag[1]}**")
+                st.progress(min(s_pol / 0.5, 1.0))
+                st.caption(f"Saldo: {s_pol} POL | Alvo: ${ag[5]}")
+                
+                if ag[9] == "VIGILANCIA":
+                    auto_abastecer(ag[2])
 
-    t1, t2 = st.tabs(["🎯 Monitor", "📊 Histórico"])
+    st.divider()
+    st.subheader("🎯 Monitor de Mercado")
+    preco_v = get_price(agentes[0][4])
+    st.info(f"Cotação Atual {agentes[0][4]}: **${preco_v}**")
     
-    with t1:
-        preco_atual = get_price(agentes[0][4])
-        st.metric(f"Preço Atual {agentes[0][4]}", f"${preco_atual}")
-        
-        for ag in agentes:
-            id_m, nome, addr, priv, alvo, p_gat, p_com, luc, stp, status, acao, data = ag
-            if status == "VIGILANCIA":
-                auto_abastecer(addr)
-                if preco_atual and preco_atual <= p_gat:
-                    db.execute("UPDATE modulos SET status='POSICIONADO', preco_compra=?, ultima_acao='COMPRADO' WHERE id=?", (preco_atual, id_m))
-                    db.commit()
-                    st.rerun()
-            
-            with st.expander(f"{nome} - {status} em ${p_gat}"):
-                st.code(addr, language="text")
-                st.write(f"Status: {acao}")
+    # Lógica de Gatilho de Compra
+    for ag in agentes:
+        if ag[9] == "VIGILANCIA" and preco_v and preco_v <= ag[5]:
+            db.execute("UPDATE modulos SET status='POSICIONADO', preco_compra=?, ultima_acao='COMPRADO' WHERE id=?", (preco_v, ag[0]))
+            db.commit()
+            st.rerun()
 
 else:
-    st.info("Aguardando lançamento da primeira rede de 25 agentes.")
+    st.info("Aguardando ordem de lançamento na barra lateral.")
 
-# Ciclo de Vida
 time.sleep(60)
 st.rerun()

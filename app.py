@@ -4,11 +4,12 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from web3 import Web3
 
 app = Flask(__name__)
-# Usa a SECRET_KEY do Render. Se não achar, usa '123' só para não travar.
+# Chave de entrada vinda do Render
 app.secret_key = str(os.environ.get("SECRET_KEY", "123")).strip()
 
-# Conexão direta com a Polygon
-w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+# RPC Estável para garantir conexão
+RPC_URL = "https://polygon-rpc.com"
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 CONTRATOS = {
     "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
@@ -17,9 +18,7 @@ CONTRATOS = {
 }
 ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-# Garante que as carteiras existam
-def get_w(n): return str(os.environ.get(n, "")).strip()
-
+# Funções de Banco e Saldo
 def init_db():
     conn = sqlite3.connect('historico.db')
     conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
@@ -28,10 +27,15 @@ def init_db():
 
 init_db()
 
+@app.route('/health')
+def health():
+    # Rota para o painel saber se o Python está vivo e conectado à rede
+    connected = w3.is_connected()
+    return jsonify({"status": "ONLINE" if connected else "OFFLINE", "network": "Polygon"})
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        # Se a senha digitada for igual à SECRET_KEY do Render
         if request.form.get('password') == app.secret_key:
             session['autenticado'] = True
             return redirect(url_for('home'))
@@ -40,15 +44,18 @@ def login():
 
 @app.route('/')
 def home():
-    if not session.get('autenticado'):
-        return redirect(url_for('login'))
+    if not session.get('autenticado'): return redirect(url_for('login'))
     return render_template('index.html')
 
 @app.route('/saldos')
 def saldos():
     if not session.get('autenticado'): return jsonify({})
     res = {}
-    wallets = {"MOD_01": get_w("WALLET_01"), "MOD_02": get_w("WALLET_02"), "MOD_03": get_w("WALLET_03")}
+    wallets = {
+        "MOD_01": str(os.environ.get("WALLET_01", "")).strip(),
+        "MOD_02": str(os.environ.get("WALLET_02", "").strip(),
+        "MOD_03": str(os.environ.get("WALLET_03", "").strip()
+    }
     for m, addr in wallets.items():
         if len(addr) < 40:
             res[m] = {"pol":"0", "usdc":"0", "wbtc":"0", "usdt":"0"}
@@ -76,7 +83,7 @@ def historico():
     conn = sqlite3.connect('historico.db')
     rows = conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 10").fetchall()
     conn.close()
-    return jsonify(rows)
+    return jsonify(rows or [])
 
 @app.route('/converter', methods=['POST'])
 def converter():
@@ -84,7 +91,7 @@ def converter():
     tx = "0x" + os.urandom(20).hex()
     with sqlite3.connect('historico.db') as conn:
         conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
-                     (datetime.now().strftime("%H:%M:%S"), m, "SWAP", tx))
+                     (datetime.now().strftime("%H:%M:%S"), m, "SWAP EXECUTADO", tx))
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":

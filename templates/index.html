@@ -1,19 +1,28 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GUARDION</title>
+    <title>GUARDION OMNI</title>
     <style>
-        body { background: #000; color: #00f2ff; font-family: monospace; padding: 20px; }
-        .card { border: 1px solid #333; padding: 10px; margin: 10px 0; }
-        .val { color: #fff; }
-        button { background: #00f2ff; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        td, th { border: 1px solid #222; padding: 8px; text-align: left; }
+        body { background: #050505; color: #00f2ff; font-family: monospace; padding: 20px; }
+        .status-bar { border: 1px solid #222; padding: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; }
+        .online { color: #00ff88; font-weight: bold; }
+        .offline { color: #ff4d4d; font-weight: bold; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card { border: 1px solid #333; padding: 15px; background: #0a0a0a; border-radius: 8px; }
+        .val { color: #fff; font-weight: bold; }
+        button { background: #00f2ff; color: #000; border: none; padding: 12px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+        th, td { border: 1px solid #222; padding: 10px; text-align: left; }
+        .copy-btn { background: #222; color: #00f2ff; border: 1px solid #00f2ff; padding: 2px 5px; cursor: pointer; font-size: 10px; margin-left: 5px; }
     </style>
 </head>
 <body>
-    <h2>🛡️ AGENTE GUARDION ACTIVE</h2>
-    <div id="cards">
+    <div class="status-bar">
+        <span>ESTADO DO AGENTE: <span id="conn-status" class="offline">VERIFICANDO...</span></span>
+        <span>REDE: POLYGON POS</span>
+    </div>
+
+    <div class="grid">
         <div class="card">
             <h3>MOD 01 (WBTC)</h3>
             POL: <span class="val" id="pol-MOD_01">...</span> | USDC: <span class="val" id="usdc-MOD_01">...</span><br>
@@ -27,20 +36,31 @@
             <button onclick="swap('MOD_02')">SWAP USDT</button>
         </div>
         <div class="card">
-            <h3>MOD 03 (MULTI)</h3>
+            <h3>MOD 03 (DIVERSIFICAR)</h3>
             POL: <span class="val" id="pol-MOD_03">...</span> | USDC: <span class="val" id="usdc-MOD_03">...</span>
-            <button onclick="swap('MOD_03')">DIVERSIFICAR</button>
+            <button onclick="swap('MOD_03')" style="background:#8b5cf6; color:#fff;">EXECUTAR MULTI</button>
         </div>
     </div>
 
-    <h3>📜 HISTÓRICO</h3>
+    <h3>📜 HISTÓRICO DE OPERAÇÕES</h3>
     <table>
         <thead><tr><th>HORA</th><th>MOD</th><th>AÇÃO</th><th>HASH</th></tr></thead>
         <tbody id="hist"></tbody>
     </table>
 
     <script>
+        async function checkConn() {
+            try {
+                const r = await fetch('/health');
+                const d = await r.json();
+                const el = document.getElementById('conn-status');
+                el.innerText = d.status;
+                el.className = d.status === 'ONLINE' ? 'online' : 'offline';
+            } catch(e) { document.getElementById('conn-status').className = 'offline'; }
+        }
+
         async function load() {
+            checkConn();
             try {
                 const s = await (await fetch('/saldos')).json();
                 for (let m in s) {
@@ -51,11 +71,14 @@
                 }
                 const h = await (await fetch('/historico')).json();
                 document.getElementById('hist').innerHTML = h.map(l => `
-                    <tr><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td>
-                    <td>${l[4].slice(0,10)}... <button onclick="navigator.clipboard.writeText('${l[4]}')">C</button></td></tr>
+                    <tr>
+                        <td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td>
+                        <td>${l[4].slice(0,12)}... <button class="copy-btn" onclick="navigator.clipboard.writeText('${l[4]}')">COPIAR</button></td>
+                    </tr>
                 `).join('');
             } catch(e) {}
         }
+
         async function swap(m) {
             await fetch('/converter', {
                 method: 'POST',
@@ -64,6 +87,7 @@
             });
             load();
         }
+
         setInterval(load, 5000);
         load();
     </script>

@@ -4,24 +4,25 @@ from eth_account import Account
 import sqlite3, time, requests, datetime
 
 # --- CONFIGURAÇÃO DE REDE ---
-st.set_page_config(page_title="GUARDION OMNI v11", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v11.1", layout="wide")
 RPC_URL = "https://polygon-rpc.com" 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # --- BANCO DE DADOS (V3 - ESTÁVEL) ---
 def init_db():
     conn = sqlite3.connect('guardion_v3.db', check_same_thread=False)
+    # Tabela expandida para incluir lucro e preço de compra
     conn.execute('''CREATE TABLE IF NOT EXISTS agentes 
                     (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                    alvo REAL, status TEXT, ultima_acao TEXT)''')
+                    alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
     conn.commit()
     return conn
 
 db = init_db()
 
-# --- INTERFACE LATERAL (CONEXÃO E COMANDO) ---
+# --- INTERFACE LATERAL ---
 with st.sidebar:
-    st.header("🔐 QG DO COMANDO")
+    st.header("🔐 ACESSO MESTRE")
     pk_input = st.text_input("Sua PK_01 Conectada:", type="password", key="pk_main")
     
     PK_MESTRE = None
@@ -31,81 +32,95 @@ with st.sidebar:
             if not pk_limpa.startswith("0x") and len(pk_limpa) == 64: pk_limpa = "0x" + pk_limpa
             acc_mestre = Account.from_key(pk_limpa)
             PK_MESTRE = pk_limpa
-            st.success(f"✅ MESTRE: {acc_mestre.address[:6]}...{acc_mestre.address[-4:]}")
+            st.success(f"✅ MESTRE ONLINE")
         except: st.error("❌ Chave Inválida")
 
     st.divider()
-    st.header("🏭 FÁBRICA DE SNIPERS")
-    p_topo = st.number_input("Preço Alvo Inicial (USD):", value=102500.0)
-    distancia = st.number_input("Distância entre Agentes ($):", value=200.0)
+    st.header("⚙️ AJUSTES DE COMBATE")
+    p_topo = st.number_input("Preço Inicial (BTC):", value=102500.0)
+    distancia = st.number_input("Distância Grid ($):", value=200.0)
+    lucro_desejado = st.number_input("Lucro para Venda ($):", value=500.0)
     
-    if st.button("🚀 LANÇAR BATALHÃO (25)"):
-        if not PK_MESTRE:
-            st.warning("Conecte a PK primeiro!")
+    if st.button("🚀 REINICIAR BATALHÃO (25)"):
+        if not PK_MESTRE: st.warning("Conecte a PK!")
         else:
-            db.execute("DELETE FROM agentes") # Limpa anterior
+            db.execute("DELETE FROM agentes")
             novos = []
             for i in range(25):
                 acc = Account.create()
                 alvo = p_topo - (i * distancia)
-                novos.append((f"SNIPER-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", "Aguardando"))
-            db.executemany("INSERT INTO agentes (nome, endereco, privada, alvo, status, ultima_acao) VALUES (?,?,?,?,?,?)", novos)
+                novos.append((f"SNIPER-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", 0.0, "Aguardando"))
+            db.executemany("INSERT INTO agentes (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
             db.commit()
             st.rerun()
 
-# --- FUNÇÕES TÁTICAS ---
+# --- MOTOR DE EXECUÇÃO ---
 def get_btc_price():
-    try:
-        return requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price']
-    except: return "---"
+    try: return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
+    except: return 0.0
 
 def abastecer_agente(addr_agente):
     if not PK_MESTRE: return
     try:
-        if w3.eth.get_balance(addr_agente) < w3.to_wei(0.1, 'ether'):
+        saldo_wei = w3.eth.get_balance(addr_agente)
+        if saldo_wei < w3.to_wei(0.1, 'ether'):
             acc_m = Account.from_key(PK_MESTRE)
             tx = {
                 'nonce': w3.eth.get_transaction_count(acc_m.address),
-                'to': addr_agente, 'value': w3.to_wei(0.5, 'ether'), # Envia 0.5 POL
+                'to': addr_agente, 'value': w3.to_wei(0.5, 'ether'),
                 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137
             }
             signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
             w3.eth.send_raw_transaction(signed.raw_transaction)
-            st.toast(f"⛽ Abastecendo {addr_agente[:6]}...", icon="🚀")
+            st.toast(f"⛽ Gas enviado para {addr_agente[:6]}")
     except: pass
 
-# --- PAINEL PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v11.0")
+# --- UI PRINCIPAL ---
+st.title("🛡️ COMMANDER OMNI v11.1")
 btc_atual = get_btc_price()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Preço BTC Atual", f"${btc_atual}")
-c2.metric("Agentes em Campo", "25")
-c3.metric("Rede", "Polygon Mainnet")
+c1.metric("BTC ATUAL", f"${btc_atual:,.2f}")
+c2.metric("LUCRO ALVO", f"+ ${lucro_desejado}")
+c3.metric("STATUS", "OPERACIONAL" if btc_atual > 0 else "OFFLINE")
 
 st.divider()
 
-# Listagem de Agentes
 agentes = db.execute("SELECT * FROM agentes").fetchall()
 if agentes:
     cols = st.columns(5)
     for idx, ag in enumerate(agentes):
+        id_banco, nome, endereco, privada, alvo, status, p_compra, acao = ag
         with cols[idx % 5]:
             with st.container(border=True):
-                # Pequeno delay para evitar erro de rede (HTTPError)
-                time.sleep(0.05)
-                try: saldo = round(w3.from_wei(w3.eth.get_balance(ag[2]), 'ether'), 2)
+                time.sleep(0.02) # Anti-ban RPC
+                try: saldo = round(w3.from_wei(w3.eth.get_balance(endereco), 'ether'), 2)
                 except: saldo = 0.0
                 
-                st.write(f"**{ag[1]}**")
-                st.caption(f"🎯 Alvo: ${ag[4]}")
-                st.write(f"⛽ {saldo} POL")
-                
-                # Lógica de Abastecimento Automático
-                if PK_MESTRE and saldo < 0.1:
-                    abastecer_agente(ag[2])
-else:
-    st.info("O Batalhão está na reserva. Configure a PK e clique em Lançar.")
+                # --- LÓGICA DE COMPRA/VENDA ---
+                cor_status = "white"
+                if status == "VIGILANCIA":
+                    if btc_atual <= alvo and btc_atual > 0:
+                        db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, ultima_acao='ORDEM COMPRA' WHERE id=?", (btc_atual, id_banco))
+                        db.commit()
+                        st.rerun()
+                elif status == "COMPRADO":
+                    cor_status = "#00FF00" # Verde para quando está posicionado
+                    if btc_atual >= (p_compra + lucro_desejado):
+                        db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0, ultima_acao='LUCRO REALIZADO' WHERE id=?", (id_banco,))
+                        db.commit()
+                        st.rerun()
 
-time.sleep(60)
+                st.markdown(f"<p style='color:{cor_status}; font-weight:bold;'>{nome}</p>", unsafe_allow_html=True)
+                st.write(f"⛽ {saldo} POL")
+                st.caption(f"🎯 Alvo: ${alvo:,.0f}")
+                if status == "COMPRADO":
+                    st.success(f"Compra: ${p_compra:,.0f}")
+                
+                if PK_MESTRE and saldo < 0.1:
+                    abastecer_agente(endereco)
+else:
+    st.info("Aguardando ativação do batalhão.")
+
+time.sleep(45)
 st.rerun()

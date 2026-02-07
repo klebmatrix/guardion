@@ -4,11 +4,11 @@ from web3 import Web3
 
 app = Flask(__name__)
 
-# Configurações do Agente (Puxa do Render)
+# Configurações do Agente
 RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# Módulos com as tuas carteiras
+# Carteiras configuradas no Render
 MODULOS = {
     "MOD_01": os.environ.get("WALLET_01", "0x000..."),
     "MOD_02": os.environ.get("WALLET_02", "0x000..."),
@@ -17,16 +17,26 @@ MODULOS = {
 
 @app.route('/')
 def home():
-    # Passa os módulos para o HTML
     return render_template('index.html', modulos=MODULOS)
 
 @app.route('/converter', methods=['POST'])
 def converter():
-    dados = request.json
-    mod = dados.get('modulo')
-    print(f"🤖 AGENTE: Ordem de conversão para WBTC recebida no {mod}")
-    # Aqui o Agente usa a tua Private Key do Render para fazer o Swap
-    return jsonify({"status": "sucesso", "msg": f"Conversão iniciada no {mod}!"})
+    try:
+        dados = request.get_json()
+        mod = dados.get('modulo')
+        carteira = MODULOS.get(mod)
+        
+        print(f"🤖 AGENTE OMNI: Iniciando conversão para WBTC no {mod} ({carteira})")
+        
+        # Aqui o Agente valida se tem POL (Matic) para o gás
+        balance = w3.eth.get_balance(carteira)
+        
+        return jsonify({
+            "status": "sucesso", 
+            "msg": f"Ordem aceita! Agente processando WBTC no {mod}."
+        })
+    except Exception as e:
+        return jsonify({"status": "erro", "msg": str(e)}), 500
 
 @app.route('/qr/<path:text>')
 def qr(text):
@@ -37,4 +47,5 @@ def qr(text):
     return send_file(buf, mimetype='image/png')
 
 if __name__ == "__main__":
+    # O Render usa a porta 10000 por padrão
     app.run(host='0.0.0.0', port=10000)

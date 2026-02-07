@@ -1,56 +1,63 @@
 <!DOCTYPE html>
-<html lang="pt-pt">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Painel Agente Multi-Módulo</title>
+    <title>OMNI Agente Multi</title>
     <style>
-        body { background: #0a0e17; color: white; font-family: sans-serif; text-align: center; padding: 20px; }
-        .grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
-        .card { background: #161e2d; border: 2px solid #3b82f6; padding: 20px; border-radius: 15px; width: 280px; }
-        .btn-converter { 
-            background: #f7931a; color: white; border: none; padding: 15px; 
-            width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 20px;
-            font-size: 16px; box-shadow: 0 4px 15px rgba(247, 147, 26, 0.3);
+        body { background: #0f172a; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; padding: 40px; }
+        .grid { display: flex; justify-content: center; gap: 25px; flex-wrap: wrap; }
+        .card { background: #1e293b; border: 2px solid #3b82f6; padding: 25px; border-radius: 20px; width: 300px; transition: 0.3s; }
+        .card:hover { transform: translateY(-5px); border-color: #f7931a; }
+        .qr-bg { background: white; padding: 10px; border-radius: 10px; margin: 20px 0; display: inline-block; }
+        .btn-wbtc { 
+            background: linear-gradient(45deg, #f7931a, #ffab40); color: white; border: none; 
+            padding: 15px 25px; width: 100%; border-radius: 10px; font-weight: bold; 
+            cursor: pointer; font-size: 16px; box-shadow: 0 4px 15px rgba(247, 147, 26, 0.4);
         }
-        .btn-converter:hover { background: #e88310; transform: scale(1.02); }
-        .status-msg { margin-top: 15px; color: #10b981; font-weight: bold; min-height: 20px; }
-        img { background: white; padding: 8px; border-radius: 10px; margin-top: 10px; }
+        .btn-wbtc:active { transform: scale(0.98); }
+        .status { margin-top: 15px; font-weight: bold; min-height: 24px; color: #10b981; }
     </style>
 </head>
 <body>
-    <h1>SISTEMA DE CONVERSÃO WBTC</h1>
-    <p>Agentes ativos com POL (Matic) detetado</p>
+    <h1>SISTEMA DE ENTRADA WBTC</h1>
+    <p style="color: #94a3b8;">Agente estratégico operando na rede Polygon</p>
 
     <div class="grid">
         {% for nome, carteira in modulos.items() %}
         <div class="card">
-            <h2 style="color: #3b82f6;">{{ nome }}</h2>
-            <img src="/qr/{{ carteira }}" width="180">
-            <p style="font-size: 10px; color: #94a3b8; word-break: break-all; margin-top: 10px;">{{ carteira }}</p>
+            <h2 style="color: #3b82f6; margin: 0;">{{ nome }}</h2>
+            <div class="qr-bg">
+                <img src="/qr/{{ carteira }}" width="180">
+            </div>
+            <p style="font-size: 10px; color: #64748b; word-break: break-all;">{{ carteira }}</p>
             
-            <button class="btn-converter" onclick="executarConversao('{{ nome }}')">
+            <button class="btn-wbtc" onclick="chamarAgente('{{ nome }}')">
                 CONVERTER PARA WBTC
             </button>
-            <div id="status-{{ nome }}" class="status-msg"></div>
+            <div id="info-{{ nome }}" class="status"></div>
         </div>
         {% endfor %}
     </div>
 
     <script>
-        async function executarConversao(moduloId) {
-            const status = document.getElementById('status-' + moduloId);
-            status.innerText = "Agente a processar...";
-            
+        async function chamarAgente(idMod) {
+            const statusBox = document.getElementById('info-' + idMod);
+            statusBox.innerText = "Agente em execução...";
+            statusBox.style.color = "#f7931a";
+
             try {
                 const response = await fetch('/converter', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({modulo: moduloId})
+                    body: JSON.stringify({ modulo: idMod })
                 });
+                
                 const data = await response.json();
-                status.innerText = data.msg;
-            } catch (e) {
-                status.innerText = "Erro ao contactar o Agente.";
+                statusBox.innerText = data.msg;
+                statusBox.style.color = "#10b981";
+            } catch (err) {
+                statusBox.innerText = "Erro: Agente fora de alcance.";
+                statusBox.style.color = "#ef4444";
             }
         }
     </script>

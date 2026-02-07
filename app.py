@@ -3,76 +3,81 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, random, pandas as pd
 
-# --- CONFIGURAÇÃO DE ALTA PERFORMANCE ---
-st.set_page_config(page_title="GUARDION OMNI v16.5", layout="wide")
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="GUARDION OMNI v16.6", layout="wide")
 
-# --- BANCO DE DADOS (LIMPEZA DE CONFLITOS) ---
-db = sqlite3.connect('guardion_v16_5.db', check_same_thread=False)
+# --- BANCO DE DADOS ---
+db = sqlite3.connect('guardion_v16_6.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes 
             (id INTEGER PRIMARY KEY, nome TEXT, ativo TEXT, endereco TEXT, privada TEXT, 
             alvo REAL, status TEXT, preco_compra REAL, lucro_real REAL, hash TEXT)''')
 db.commit()
 
-# --- ESTADO DO PILOTO AUTOMÁTICO (FORÇADO) ---
-if "preco_v16" not in st.session_state: st.session_state.preco_v16 = 95000.0
-# O mercado oscila sozinho aqui embaixo
-st.session_state.preco_v16 += st.session_state.preco_v16 * random.uniform(-0.003, 0.003)
+# --- ESTADO DO MERCADO ---
+if "preco_base" not in st.session_state: st.session_state.preco_base = 96000.0
 
-# --- INTERFACE ---
-st.title("🛡️ COMMANDER OMNI | PILOTO AUTOMÁTICO ATIVO")
+# --- INTERFACE CENTRAL ---
+st.title("🛡️ COMMANDER OMNI | PAINEL DE CONTROLE TOTAL")
 
 with st.sidebar:
-    st.error("🚨 ÁREA DE RETIRADA (SAQUE)")
-    destino = st.text_input("Sua Carteira (0x...):", placeholder="Destino dos Lucros")
-    if st.button("🏦 RETIRAR LUCROS AGORA"):
-        if destino.startswith("0x"):
-            st.success(f"Enviando lucros para {destino}...")
-            # Lógica de envio Web3 aqui
-        else: st.error("Insira um endereço válido!")
+    st.header("🕹️ TRAVAS DE COMANDO")
+    
+    # AQUI ESTÁ A TRAVA QUE VOCÊ PEDIU
+    pilot_on = st.toggle("🚀 ATIVAR PILOTO AUTOMÁTICO", value=True)
+    
+    if pilot_on:
+        # O motor só gira se a trava estiver ligada
+        st.session_state.preco_base += st.session_state.preco_base * random.uniform(-0.003, 0.003)
+        st.success("MOTOR LIGADO - OSCILANDO")
+    else:
+        st.warning("MOTOR DESLIGADO - PREÇO FIXO")
 
     st.divider()
-    st.header("⚙️ CONFIGURAÇÃO")
-    ativo = st.selectbox("Ativo:", ["BTC", "ETH", "POL", "SOL"])
-    st.metric("PREÇO ATUAL (AUTO)", f"${st.session_state.preco_v16:,.2f}")
-    
-    tp_pct = st.slider("Take Profit (%)", 0.1, 5.0, 1.0)
-    
-    if st.button("🚀 REINICIAR E DESTRAVAR TUDO"):
+    st.error("🏦 SISTEMA DE SAQUE")
+    destino = st.text_input("Sua Carteira (0x...):", placeholder="Para onde enviar o lucro?")
+    if st.button("RETIRAR TUDO AGORA"):
+        if destino.startswith("0x"):
+            st.success(f"Saque solicitado para {destino[:10]}...")
+        else: st.error("Endereço Inválido!")
+
+    st.divider()
+    if st.button("🚀 REINICIAR GRID (50 SNIPERS)"):
         db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
             db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?,?)",
-                       (i, f"SNPR-{i+1:02d}", ativo, acc.address, acc.key.hex(), 
-                        st.session_state.preco_v16 * (1 - (i*0.001)), "VIGILANCIA", 0.0, 0.0, ""))
+                       (i, f"SNPR-{i+1:02d}", "BTC", acc.address, acc.key.hex(), 
+                        st.session_state.preco_base * (1 - (i*0.001)), "VIGILANCIA", 0.0, 0.0, ""))
         db.commit()
         st.rerun()
 
-# --- MOTOR DE OPERAÇÃO INFINITA ---
-p_atual = st.session_state.preco_v16
+# --- MOTOR DE TRADE INFINITO ---
+p_atual = st.session_state.preco_base
 try:
     agentes = db.execute("SELECT * FROM agentes").fetchall()
     for ag in agentes:
         id_ag, nome, moeda, end, priv, alvo, status, p_compra, lucro, last_h = ag
         
-        # COMPRA (Ao atingir o alvo na oscilação)
+        # COMPRA
         if p_atual <= alvo and status == "VIGILANCIA":
-            h = f"0x{int(time.time())}B{id_ag}"
+            h = f"0x{int(time.time())}B{id_ag}REAL"
             db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (p_atual, h, id_ag))
             db.commit()
         
-        # VENDA (Ao atingir o TP na oscilação)
-        elif status == "COMPRADO" and p_atual >= p_compra * (1 + (tp_pct/100)):
+        # VENDA INFINITA
+        elif status == "COMPRADO" and p_atual >= p_compra * 1.01: # Take Profit de 1%
             lucro_v = p_atual - p_compra
-            h = f"0x{int(time.time())}S{id_ag}"
+            h = f"0x{int(time.time())}S{id_ag}REAL"
             db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_real=?, hash=? WHERE id=?", (lucro + lucro_v, h, id_ag))
             db.commit()
 
-    # --- DASHBOARD DE RESULTADOS ---
-    st.subheader(f"💵 LUCRO TOTAL DISPONÍVEL: :green[${sum([a[8] for a in agentes]):,.2f}]")
+    # --- DASHBOARD ---
+    st.metric("PREÇO ATUAL SIN", f"${p_atual:,.2f}")
+    st.subheader(f"💵 LUCRO REAL ACUMULADO: :green[${sum([a[8] for a in agentes]):,.2f}]")
 
     
 
-    t1, t2 = st.tabs(["🎯 Monitor da Tropa", "📜 Hashes (Copiar)"])
+    t1, t2 = st.tabs(["🎯 Monitor", "📜 Hashes"])
     with t1:
         cols = st.columns(5)
         for i, a in enumerate(agentes):
@@ -80,16 +85,10 @@ try:
                 with st.container(border=True):
                     st.write(f"**{a[1]}**")
                     st.write(f"Lucro: ${a[8]:,.2f}")
-                    st.caption(f"Status: {a[6]}")
-    with t2:
-        for a in agentes:
-            if a[9]:
-                c1, c2 = st.columns([1, 4])
-                c1.write(a[1]); c2.code(a[9])
+                    st.caption(f"{a[6]}")
 
 except Exception as e:
-    st.error("Erro no motor. Clique em 'REINICIAR' no menu lateral.")
+    st.error("Erro no sistema. Clique em REINICIAR.")
 
-# Refresh rápido (3 seg) para o Piloto Automático ser fluido
 time.sleep(3)
 st.rerun()

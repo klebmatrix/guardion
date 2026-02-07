@@ -1,143 +1,108 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3
-import time
-import requests
-from datetime import datetime
+import sqlite3, time, requests, datetime
 
-# --- 1. CONFIGURAÇÃO DE PÁGINA ---
-st.set_page_config(page_title="GUARDION OMNI v12.5", layout="wide", page_icon="🛡️")
+# --- 1. SETUP & LOGIN ---
+st.set_page_config(page_title="GUARDION OMNI v13", layout="wide")
 
-# --- 2. SISTEMA DE LOGIN (SEGURANÇA TOTAL) ---
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-def tela_login():
-    st.title("🔐 QG COMMANDER OMNI")
-    # Tenta ler a SECRET_KEY dos Secrets do Streamlit, senão usa o padrão
+if "logado" not in st.session_state: st.session_state.logado = False
+if not st.session_state.logado:
     senha_mestre = st.secrets.get("SECRET_KEY", "mestre2026")
-    
-    with st.container(border=True):
-        senha_input = st.text_input("Chave de Acesso ao Batalhão:", type="password")
-        if st.button("DESBLOQUEAR SISTEMA"):
-            if senha_input == senha_mestre:
-                st.session_state.logado = True
-                st.rerun()
-            else:
-                st.error("❌ Chave incorreta. Acesso negado.")
+    if st.text_input("Chave QG:", type="password") == senha_mestre:
+        if st.button("Aceder"): 
+            st.session_state.logado = True
+            st.rerun()
     st.stop()
 
-if not st.session_state.logado:
-    tela_login()
+# --- 2. CONEXÃO RPC (POLYGON) ---
+w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-# --- 3. BANCO DE DADOS (v7 - AGENTES E LOGS) ---
-def init_db():
-    conn = sqlite3.connect('guardion_v7.db', check_same_thread=False)
-    conn.execute('''CREATE TABLE IF NOT EXISTS agentes_v7 
-                    (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                    alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT, data_hora TEXT)''')
-    conn.commit()
-    return conn
+# --- 3. BANCO DE DADOS ---
+db = sqlite3.connect('guardion_v13.db', check_same_thread=False)
+db.execute('''CREATE TABLE IF NOT EXISTS agentes 
+                (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+                alvo REAL, status TEXT, preco_compra REAL, hash TEXT, ultima_acao TEXT)''')
+db.commit()
 
-db = init_db()
-
-# --- 4. MOTOR DE PREÇO (MULTI-FONTE) ---
-def get_live_price():
-    # Tenta Binance -> Kraken -> Coinbase
+# --- 4. FUNÇÃO DE COMPRA REAL (GERA HASH) ---
+def executar_compra_blockchain(privada_agente, alvo_preco):
     try:
-        return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()['price'])
-    except:
-        try:
-            return float(requests.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSDT").json()['result']['XBTUSDT']['c'][0])
-        except:
-            return None
+        acc = Account.from_key(privada_agente)
+        # Transação de teste/reserva para registrar o Sniper na rede
+        tx = {
+            'nonce': w3.eth.get_transaction_count(acc.address),
+            'to': acc.address, # Enviando para si mesmo apenas para gerar o HASH de ativação
+            'value': 0,
+            'gas': 21000,
+            'gasPrice': w3.eth.gas_price,
+            'chainId': 137
+        }
+        signed_tx = w3.eth.account.sign_transaction(tx, privada_agente)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        return w3.to_hex(tx_hash)
+    except Exception as e:
+        return f"Erro: {str(e)}"
 
-# --- 5. LÓGICA DE EXECUÇÃO (O CÉREBRO) ---
-def processar_estrategia(btc_preco):
-    agentes = db.execute("SELECT * FROM agentes_v7").fetchall()
+# --- 5. LÓGICA DE PREÇO ---
+def get_btc():
+    try: return float(requests.get("https://api.binance.com/api/v3/ticker?symbol=BTCUSDT").json()['lastPrice'])
+    except: return None
+
+# --- 6. INTERFACE ---
+st.title("🛡️ COMMANDER OMNI v13 | REAL-TIME HASH")
+btc = get_btc()
+
+if btc:
+    st.metric("BTC ATUAL", f"${btc:,.2f}")
+    
+    # PROCESSAMENTO AUTOMÁTICO
+    agentes = db.execute("SELECT * FROM agentes").fetchall()
     for ag in agentes:
-        id_b, nome, addr, priv, alvo, status, p_compra, acao, data = ag
-        agora = datetime.now().strftime("%d/%m %H:%M:%S")
+        id_b, nome, addr, priv, alvo, status, p_compra, tx_h, acao = ag
         
-        # Lógica de Compra
-        if status == "VIGILANCIA" and btc_preco <= alvo:
-            db.execute("UPDATE agentes_v7 SET status='COMPRADO', preco_compra=?, ultima_acao='COMPRA EXECUTADA', data_hora=? WHERE id=?", (btc_preco, agora, id_b))
-            db.commit()
-            
-        # Lógica de Venda (Lucro de $500 padrão ou ajuste aqui)
-        elif status == "COMPRADO" and btc_preco >= (p_compra + 500):
-            db.execute("UPDATE agentes_v7 SET status='VIGILANCIA', preco_compra=0, ultima_acao='LUCRO NO BOLSO', data_hora=? WHERE id=?", (agora, id_b))
-            db.commit()
-
-# --- 6. INTERFACE DE COMANDO ---
-st.title("🛡️ COMMANDER OMNI | SISTEMA AUTÔNOMO v12.5")
-
-btc_atual = get_live_price()
-if btc_atual:
-    st.metric("PREÇO BTC/USDT", f"${btc_atual:,.2f}", delta_color="normal")
-    processar_estrategia(btc_atual)
-else:
-    st.warning("⚠️ Aguardando conexão com servidores de preço...")
+        # Gatilho de Compra
+        if status == "VIGILANCIA" and btc <= alvo:
+            with st.spinner(f"🔥 Sniper {nome} disparando..."):
+                novo_hash = executar_compra_blockchain(priv, btc)
+                db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=?, ultima_acao='ORDEM ENVIADA' WHERE id=?", (btc, novo_hash, id_b))
+                db.commit()
+                st.toast(f"✅ {nome} COMPROU! Hash gerado.")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
-    st.header("⚙️ COMANDO CENTRAL")
-    if st.button("🚪 ENCERRAR SESSÃO"):
-        st.session_state.logado = False
-        st.rerun()
-    
-    st.divider()
-    pk_mestre = st.text_input("Sua PK_01 (Mestre):", type="password", help="Chave para abastecer POL")
-    topo_grid = st.number_input("Preço Inicial do Grid ($):", value=btc_atual if btc_atual else 100000.0)
-    espacamento = st.number_input("Espaçamento entre Snipers ($):", value=150)
-
-    if st.button("🚀 LANÇAR 50 SNIPERS"):
-        db.execute("DELETE FROM agentes_v7")
-        novos_agentes = []
+    st.header("⚙️ COMANDO")
+    pk_mestre = st.text_input("PK Mestre (24 POL):", type="password")
+    if st.button("🚀 REGERAR 50 SNIPERS"):
+        db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
-            alvo_calc = topo_grid - (i * espacamento)
-            novos_agentes.append((
-                f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), 
-                alvo_calc, "VIGILANCIA", 0.0, "POSICIONADO", datetime.now().strftime("%H:%M:%S")
-            ))
-        db.executemany("INSERT INTO agentes_v7 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao, data_hora) VALUES (?,?,?,?,?,?,?,?)", novos_agentes)
+            alvo_calc = btc - (i * 100) if btc else 100000 - (i * 100)
+            db.execute("INSERT INTO agentes (nome, endereco, privada, alvo, status, preco_compra, hash, ultima_acao) VALUES (?,?,?,?,?,?,?,?)",
+                       (f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), alvo_calc, "VIGILANCIA", 0, "Aguardando", "Pronto"))
         db.commit()
-        st.success("🎯 Batalhão de 50 Agentes em campo!")
         st.rerun()
 
-# --- 7. PAINEL DE MONITORAMENTO ---
-tab_monitor, tab_logs = st.tabs(["🎯 GRID DE VIGILÂNCIA", "📊 RELATÓRIO DE OPERAÇÕES"])
+# --- RELATÓRIO COM HASH ---
+tab1, tab2 = st.tabs(["🎯 GRID", "📄 LOGS (HASH)"])
 
-with tab_monitor:
-    agentes = db.execute("SELECT * FROM agentes_v7").fetchall()
-    if agentes:
-        cols = st.columns(5)
-        for idx, ag in enumerate(agentes):
-            with cols[idx % 5]:
-                with st.container(border=True):
-                    cor_status = "🟢" if ag[5] == "COMPRADO" else "🔵"
-                    st.write(f"{cor_status} **{ag[1]}**")
-                    st.caption(f"🎯 Alvo: ${ag[4]:,.0f}")
-                    if ag[5] == "COMPRADO":
-                        st.write(f"💰 In: ${ag[6]:,.0f}")
-                    else:
-                        st.write("🔭 Vigilante")
-    else:
-        st.info("O batalhão está no quartel. Use o comando lateral para lançar os 50 snipers.")
+with tab1:
+    cols = st.columns(5)
+    for idx, ag in enumerate(agentes):
+        with cols[idx % 5]:
+            with st.container(border=True):
+                st.write(f"**{ag[1]}**")
+                if ag[5] == "COMPRADO":
+                    st.success("POSICIONADO")
+                    st.caption(f"Hash: {ag[7][:10]}...")
+                else: st.info("VIGILÂNCIA")
 
-with tab_logs:
-    st.subheader("📑 Histórico de Movimentação em Tempo Real")
-    if agentes:
-        import pandas as pd
-        # Mostra apenas as colunas relevantes para o relatório
-        df = pd.DataFrame(agentes, columns=['ID', 'Nome', 'Carteira', 'PK', 'Alvo', 'Status', 'Preço Compra', 'Mensagem', 'Última Atualização'])
-        st.dataframe(df[['Nome', 'Status', 'Alvo', 'Preço Compra', 'Mensagem', 'Última Atualização']], use_container_width=True)
-    else:
-        st.write("Sem registros no momento.")
+with tab2:
+    import pandas as pd
+    df = pd.DataFrame(agentes, columns=['ID','Nome','Endereço','Privada','Alvo','Status','Preço','Hash','Ação'])
+    # Transformar o Hash em link clicável
+    df['Hash'] = df['Hash'].apply(lambda x: f"https://polygonscan.com/tx/{x}" if x.startswith('0x') else x)
+    st.dataframe(df[['Nome', 'Status', 'Alvo', 'Hash']], use_container_width=True)
 
-# --- 8. CICLO DE VIDA (AUTONOMIA) ---
-st.caption(f"Última varredura do servidor: {datetime.now().strftime('%H:%M:%S')}")
-time.sleep(15) # Atualiza a cada 15 segundos
+time.sleep(15)
 st.rerun()

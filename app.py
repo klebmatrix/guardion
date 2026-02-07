@@ -1,114 +1,46 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, requests, os, secrets
-import pandas as pd
-from datetime import datetime
+import sqlite3, time, requests, os
 
-# --- CONFIGURAÇÕES E CONEXÃO ---
-st.set_page_config(page_title="GUARDION COMMANDER v5.1", layout="wide")
+# --- CONEXÃO E SEGURANÇA ---
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.publicnode.com"))
 
-# --- BANCO DE DADOS COM AUTO-MIGRAÇÃO ---
-def init_db():
-    db_path = 'guardion_data.db'
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    
-    # Criar tabela se não existir
-    conn.execute('''CREATE TABLE IF NOT EXISTS modulos 
-                    (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                    alvo TEXT, preco_gatilho REAL, preco_compra REAL, lucro_esperado REAL, 
-                    stop_loss REAL, status TEXT, ultima_acao TEXT)''')
-    
-    # Tenta adicionar a coluna data_criacao caso ela falte (Corrige o erro do Pandas)
-    try:
-        conn.execute("ALTER TABLE modulos ADD COLUMN data_criacao TEXT")
-    except:
-        pass # Coluna já existe
+# A Chave Mestre deve estar no arquivo .streamlit/secrets.toml como PK_MESTRE = "sua_chave"
+PK_MESTRE = st.secrets.get("PK_MESTRE")
+
+def auto_abastecer(endereco_agente):
+    if not PK_MESTRE:
+        return # Sem chave mestre, não há como abastecer sozinho
         
-    conn.commit()
-    return conn
-
-db = init_db()
-
-# --- MOTOR DE PREÇOS ---
-def get_live_price(coin):
     try:
-        ids = {"WBTC": "bitcoin", "ETH": "ethereum", "POL": "matic-network"}
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids[coin]}&vs_currencies=usd"
-        res = requests.get(url, timeout=5).json()
-        return res[ids[coin]]['usd']
-    except: return None
+        acc_mestre = Account.from_key(PK_MESTRE)
+        saldo_agente = w3.eth.get_balance(endereco_agente)
+        limite_minimo = w3.to_wei(0.1, 'ether') # 0.1 POL
+        
+        if saldo_agente < limite_minimo:
+            st.toast(f"⛽ Abastecendo agente {endereco_agente[:6]}...")
+            
+            tx = {
+                'nonce': w3.eth.get_transaction_count(acc_mestre.address),
+                'to': endereco_agente,
+                'value': w3.to_wei(0.5, 'ether'), # Envia 0.5 POL
+                'gas': 21000,
+                'gasPrice': w3.eth.gas_price,
+                'chainId': 137
+            }
+            signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
+            w3.eth.send_raw_transaction(signed.raw_transaction)
+            return True
+    except:
+        return False
 
-# --- INTERFACE ---
-st.title("🎖️ QG GUARDION | COMANDO SUPREMO")
+# --- NO LOOP PRINCIPAL DO SEU CÓDIGO ---
+# (Dentro do loop que percorre os agentes)
 
-# Indicadores Rápidos
-agentes_vivos = db.execute("SELECT COUNT(*) FROM modulos WHERE status != 'FINALIZADO'").fetchone()[0]
-c1, c2, c3 = st.columns(3)
-c1.metric("Divisões Ativas", agentes_vivos)
-c2.metric("Rede", "Polygon", "Ativa")
-c3.metric("Frequência", "60s", "Auto-Check")
-
-# --- SIDEBAR: FÁBRICA E MÍSSIL ---
-with st.sidebar:
-    st.header("🏭 Fábrica de Batalhão")
-    qtd = st.slider("Recrutar Agentes:", 1, 20, 5)
-    moeda = st.selectbox("Alvo", ["WBTC", "ETH"])
-    p_comp = st.number_input("Preço de Entrada (USD):", value=45000.0)
+for ag in agentes:
+    # ... código de monitoramento de preço ...
     
-    if st.button("🚀 GERAR BATALHÃO"):
-        for _ in range(qtd):
-            acc = Account.create()
-            db.execute("""INSERT INTO modulos 
-                       (nome, endereco, privada, alvo, preco_gatilho, preco_compra, lucro_esperado, stop_loss, status, ultima_acao, data_criacao) 
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                       (f"AG-{secrets.token_hex(2).upper()}", acc.address, acc.key.hex(), moeda, p_comp, 0.0, 10.0, 5.0, "VIGILANCIA", "Pronto", datetime.now().strftime("%d/%m %H:%M")))
-        db.commit()
-        st.success("Tropas Recrutadas!")
-        st.rerun()
-
-    st.divider()
-    st.header("🚀 Míssil de Gás")
-    pk_m = st.text_input("PK Mestre (Wallet 01):", type="password")
-    if st.button("DISPARAR COMBUSTÍVEL"):
-        st.info("Função de disparo em massa ativada...")
-
-# --- PAINEL DE GUERRA ---
-tabs = st.tabs(["🎯 Vigilância", "🔥 Em Combate", "📊 Histórico"])
-
-with tabs[0]: # VIGILÂNCIA
-    vigi = db.execute("SELECT * FROM modulos WHERE status='VIGILANCIA'").fetchall()
-    if vigi:
-        for v in vigi:
-            p_agora = get_live_price(v[4])
-            with st.expander(f"🤖 {v[1]} - Alvo: {v[4]} (${v[5]})"):
-                st.write(f"Endereço: `{v[2]}`")
-                st.write(f"Preço: **${p_agora}**")
-                if p_agora and p_agora <= v[5]:
-                    db.execute("UPDATE modulos SET status='POSICIONADO', preco_compra=?, ultima_acao=? WHERE id=?", (p_agora, "Compra Efetuada", v[0]))
-                    db.commit()
-                    st.rerun()
-    else: st.info("Nenhum agente vigiando no momento.")
-
-with tabs[1]: # POSICIONADOS
-    pos = db.execute("SELECT * FROM modulos WHERE status='POSICIONADO'").fetchall()
-    if pos:
-        for p in pos:
-            p_atual = get_live_price(p[4])
-            st.warning(f"🚀 {p[1]} posicionado em {p[4]} | Comprado a ${p[6]} | Agora: ${p_atual}")
-    else: st.info("Nenhuma tropa em combate.")
-
-with tabs[2]: # HISTÓRICO (Onde dava o erro)
-    try:
-        # Usamos uma query que garante a existência das colunas
-        hist_df = pd.read_sql_query("SELECT nome, alvo, preco_compra, status, ultima_acao, data_criacao FROM modulos WHERE status IN ('FINALIZADO', 'STOPPED')", conn := sqlite3.connect('guardion_data.db'))
-        if not hist_df.empty:
-            st.dataframe(hist_df, use_container_width=True)
-        else: st.write("Aguardando primeiras vitórias.")
-    except Exception as e:
-        st.error(f"Erro ao carregar histórico. Tente criar um novo agente primeiro.")
-
-# Auto-refresh
-time.sleep(60)
-st.rerun()
+    # VERIFICAÇÃO AUTOMÁTICA DE COMBUSTÍVEL
+    if ag[9] != 'FINALIZADO': # ag[9] é o status
+        auto_abastecer(ag[2]) # ag[2] é o endereço do agente

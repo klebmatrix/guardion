@@ -1,72 +1,42 @@
-import os, threading, time, io, qrcode, requests
-from flask import Flask, render_template, send_file
-from web3 import Web3
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Agente Estratégico Multi</title>
+    <style>
+        body { background: #020617; color: #f8fafc; font-family: sans-serif; text-align: center; }
+        .market-bar { background: #1e293b; padding: 10px; border-bottom: 2px solid #3b82f6; font-weight: bold; }
+        .grid { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 30px; }
+        .card { background: #1e293b; border: 1px solid #3b82f6; padding: 20px; border-radius: 12px; width: 260px; }
+        .qr-box { background: white; padding: 10px; display: inline-block; border-radius: 8px; margin: 15px 0; }
+        .status-on { color: #10b981; animation: blink 2s infinite; }
+        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.5;} 100% {opacity: 1;} }
+    </style>
+</head>
+<body>
+    <div class="market-bar">BTC/USDC: <span id="btc-price">Carregando...</span></div>
+    <h1>AGENTE MULTI-ENTRADA</h1>
+    <p>O robô só executa a movimentação quando detecta saldo e condições favoráveis.</p>
 
-app = Flask(__name__)
+    <div class="grid">
+        {% for nome, carteira in modulos.items() %}
+        <div class="card">
+            <div class="status-on">● AGENTE {{ nome }} ONLINE</div>
+            <div class="qr-box">
+                <img src="/qr/{{ carteira }}" width="160">
+            </div>
+            <p><small>Deposite para Iniciar Entrada</small></p>
+            <p style="font-size: 9px;">{{ carteira }}</p>
+        </div>
+        {% endfor %}
+    </div>
 
-# Configurações de Rede
-RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-# Endereços dos Módulos (Pegando do Render)
-MODULOS = {
-    "MOD_01": os.environ.get("WALLET_01", "0x000..."),
-    "MOD_02": os.environ.get("WALLET_02", "0x000..."),
-    "MOD_03": os.environ.get("WALLET_03", "0x000...")
-}
-
-def obter_preco_wbtc():
-    """Busca o preço atual do Bitcoin na rede"""
-    try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        res = requests.get(url).json()
-        return float(res['price'])
-    except:
-        return 0
-
-def agente_estrategico():
-    print("🚀 AGENTE ESTRATÉGICO OMNI: Ativado.")
-    preco_alvo = 0 # Define uma lógica de entrada
-
-    while True:
-        preco_atual = obter_preco_wbtc()
-        print(f"📊 Preço atual BTC: ${preco_atual}")
-
-        for mod, addr in MODULOS.items():
-            if "0x" not in addr: continue
-            
-            try:
-                # 1. Verifica se há saldo de USDC na carteira
-                # (Aqui usamos uma checagem simples de saldo nativo para exemplo)
-                saldo = w3.eth.get_balance(addr)
-                
-                if saldo > 0:
-                    # LÓGICA DE VANTAGEM: Só compra se o preço não estiver em pico
-                    # Ou simplesmente executa se houver saldo e a taxa estiver baixa
-                    print(f"💰 {mod}: Saldo detectado! Analisando oportunidade...")
-                    
-                    if preco_atual > 0:
-                        print(f"⚡ EXECUTANDO COMPRA VANTAJOSA: {mod} trocando USDC por WBTC")
-                        # Aqui entra a função de swap real com sua PRIVATE_KEY
-                
-            except Exception as e:
-                print(f"⚠️ Erro no {mod}: {e}")
-        
-        time.sleep(60) # Analisa o mercado a cada 1 minuto
-
-threading.Thread(target=agente_estrategico, daemon=True).start()
-
-@app.route('/')
-def home():
-    return render_template('index.html', modulos=MODULOS)
-
-@app.route('/qr/<path:text>')
-def qr(text):
-    img = qrcode.make(text)
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    return send_file(buf, mimetype='image/png')
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    <script>
+        // Atualiza o preço na tela para você acompanhar
+        setInterval(async () => {
+            const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+            const data = await res.json();
+            document.getElementById('btc-price').innerText = '$' + parseFloat(data.price).toLocaleString();
+        }, 5000);
+    </script>
+</body>
+</html>

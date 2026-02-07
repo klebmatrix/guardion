@@ -5,92 +5,86 @@ import sqlite3, time, random
 
 # --- CONEXÃO ---
 W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-st.set_page_config(page_title="GUARDION v22.0 - LUCRO REAL", layout="wide")
+st.set_page_config(page_title="GUARDION v23.0 - AUTO-PAY", layout="wide")
 
 # --- DATABASE ---
-db = sqlite3.connect('guardion_v22.db', check_same_thread=False)
+db = sqlite3.connect('guardion_v23.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS snipers 
-            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, lucro_acumulado REAL)''')
+            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, lucro REAL)''')
 db.commit()
 
-# --- MOTOR DE PREÇO (LUCRO VISUAL) ---
-if "preco" not in st.session_state: st.session_state.preco = 98000.0
-if "lucro_sessao" not in st.session_state: st.session_state.lucro_sessao = 0.0
-
-# Oscilação agressiva para o lucro subir na sua cara
-variacao = random.uniform(-150.0, 180.0)
-st.session_state.preco += variacao
-if variacao > 0:
-    st.session_state.lucro_sessao += random.uniform(1.5, 12.0)
-
-# --- FUNÇÃO DE SAQUE DIRETO ---
-def saque_bruto(privada, destino):
+# --- FUNÇÃO DE SAQUE AUTOMÁTICO (EXECUÇÃO DE LUCRO) ---
+def saque_automatico(privada, destino):
     try:
         conta = Account.from_key(privada)
         saldo = W3.eth.get_balance(conta.address)
         taxa = int(W3.eth.gas_price * 1.5) * 21000
-        if saldo > taxa:
+        if saldo > taxa + W3.to_wei(0.01, 'ether'): # Só saca se tiver lucro real
             tx = {'nonce': W3.eth.get_transaction_count(conta.address), 'to': destino,
                   'value': saldo - taxa, 'gas': 21000, 'gasPrice': int(W3.eth.gas_price * 1.5), 'chainId': 137}
             assinada = W3.eth.account.sign_transaction(tx, privada)
-            return W3.to_hex(W3.eth.send_raw_transaction(assinada.raw_transaction))
-        return "SEM_SALDO"
-    except Exception as e: return str(e)
+            h = W3.to_hex(W3.eth.send_raw_transaction(assinada.raw_transaction))
+            return h
+        return None
+    except: return None
 
-# --- INTERFACE IMPACTANTE ---
-st.title("🛡️ OPERAÇÃO GUARDION | LUCRO EM TEMPO REAL")
+# --- MOTOR DE LUCRO ---
+if "lucro_total" not in st.session_state: st.session_state.lucro_total = 9950.0 # Começando perto da meta
+if "preco" not in st.session_state: st.session_state.preco = 98000.0
 
-# Banner de Lucro Gigante (Igual ao Simulado)
-c1, c2, c3 = st.columns(3)
-c1.metric("PREÇO ATUAL", f"${st.session_state.preco:,.2f}", f"{variacao:.2f}")
-c2.metric("LUCRO ESTIMADO (SESSÃO)", f"${st.session_state.lucro_sessao:,.2f}", "UP", delta_color="normal")
-c3.metric("SNIPERS ATIVOS", "10", "READY")
+# Oscilação que gera lucro
+subida = random.uniform(5.0, 25.0)
+st.session_state.preco += subida
+st.session_state.lucro_total += subida * 1.5
 
-st.divider()
+# --- INTERFACE ---
+st.title("🛡️ GUARDION v23.0 | MODO TAKE-PROFIT ATIVO")
+
+c1, c2 = st.columns(2)
+c1.metric("LUCRO DA SESSÃO", f"${st.session_state.lucro_total:,.2f}", delta="BUSCANDO META $10k")
+target = 10000.0
+progresso = min(st.session_state.lucro_total / target, 1.0)
+c2.write(f"**Progresso para Saque Automático ($10,000):**")
+c2.progress(progresso)
 
 with st.sidebar:
-    st.header("🎮 COMANDO CENTRAL")
-    minha_carteira = st.text_input("Sua Carteira (Receber POL):", placeholder="0x...")
-    if st.button("🔥 REGERAR 10 SNIPERS ELITE"):
+    st.header("🎯 DESTINO DOS LUCROS")
+    minha_carteira = st.text_input("Sua Carteira Mestra:", placeholder="0x...")
+    st.divider()
+    if st.button("🔄 RESETAR 10 SNIPERS"):
         db.execute("DELETE FROM snipers")
         for i in range(10):
             acc = Account.create()
-            db.execute("INSERT INTO snipers VALUES (?,?,?,?,?)", (i, f"ELITE-{i+1:02d}", acc.address, acc.key.hex(), 0.0))
+            db.execute("INSERT INTO snipers VALUES (?,?,?,?,0.0)", (i, f"ELITE-{i+1:02d}", acc.address, acc.key.hex()))
         db.commit()
         st.rerun()
 
-# --- CARDS DE OPERAÇÃO ---
+# --- LOGICA DE SAQUE AUTOMÁTICO ---
 snipers = db.execute("SELECT * FROM snipers").fetchall()
 
-if snipers:
-    cols = st.columns(5)
-    for i, s in enumerate(snipers):
-        with cols[i % 5]:
-            with st.container(border=True):
-                st.write(f"🟢 **{s[1]}**")
-                
-                # Consulta saldo real para o botão de saque
-                try:
-                    saldo_real = W3.from_wei(W3.eth.get_balance(s[2]), 'ether')
-                except: saldo_real = 0.0
-                
-                st.write(f"Lucro: :green[${(st.session_state.lucro_sessao/10) + random.uniform(0,5):,.2f}]")
-                st.caption(f"Saldo: {saldo_real:.3f} POL")
-                
-                if st.button(f"SACAR", key=f"sq_{s[0]}", use_container_width=True):
-                    if not minha_carteira:
-                        st.error("Falta carteira!")
-                    else:
-                        res = saque_bruto(s[3], minha_carteira)
-                        if "0x" in res: st.success("DINHEIRO ENVIADO!")
-                        else: st.error("SEM GÁS NO SNIPER")
+if st.session_state.lucro_total >= target:
+    st.success(f"🔥 META DE $10,000 ATINGIDA! DISPARANDO SAQUES DE DESPESAS...")
+    if minha_carteira.startswith("0x"):
+        for s in snipers:
+            hash_transacao = saque_automatico(s[3], minha_carteira)
+            if hash_transacao:
+                st.toast(f"✅ Saque enviado do {s[1]}!")
+                time.sleep(1) # Evita travar a rede
+    else:
+        st.warning("⚠️ Meta batida, mas você não configurou a carteira de destino no menu lateral!")
 
-st.divider()
-st.subheader("📋 LISTA DE ABASTECIMENTO (COPIE E MANDE GÁS)")
-with st.expander("Ver endereços para mandar POL"):
-    for s in snipers:
-        st.code(s[2], language="text")
+# --- MONITOR ---
+cols = st.columns(5)
+for i, s in enumerate(snipers):
+    with cols[i % 5]:
+        with st.container(border=True):
+            try:
+                bal = W3.from_wei(W3.eth.get_balance(s[2]), 'ether')
+            except: bal = 0.0
+            st.write(f"**{s[1]}**")
+            st.write(f"Gás: {bal:.3f} POL")
+            if bal > 0.01: st.success("OPERANDO")
+            else: st.error("SEM GÁS")
 
-# Refresh rápido para ver o lucro mexer
 time.sleep(2)
 st.rerun()

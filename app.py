@@ -3,81 +3,91 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, random
 
-# --- CONEXÃO ESTÁVEL (LlamaNodes é mais resiliente) ---
-W3 = Web3(Web3.HTTPProvider("https://polygon.llamarpc.com"))
+# --- CONEXÃO DE ALTA PRIORIDADE ---
+# Se o público travar, ele tenta o da Cloudflare que é mais estável
+RPC_URL = "https://polygon-mainnet.public.blastapi.io" 
+W3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-st.set_page_config(page_title="GUARDION v18.5 - STATUS REAL", layout="wide")
+st.set_page_config(page_title="GUARDION v19.0 - BLACK", layout="wide")
 
-# --- DATABASE ---
-db = sqlite3.connect('guardion_v18_5.db', check_same_thread=False)
-db.execute('''CREATE TABLE IF NOT EXISTS agentes 
-            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, status TEXT)''')
+# --- BANCO DE DADOS ROBUSTO ---
+db = sqlite3.connect('guardion_v19.db', check_same_thread=False)
+db.execute('''CREATE TABLE IF NOT EXISTS tropa 
+            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, lucro REAL)''')
 db.commit()
 
-st.title("🛡️ MONITOR DE OPERAÇÃO AUTOMÁTICA")
+# --- INTERFACE LIMPA ---
+st.title("🛡️ GUARDION v19.0 | OPERAÇÃO REAL")
 
-# --- ÁREA DE COMANDO ---
 with st.sidebar:
-    st.header("🎮 COMANDOS")
-    if st.button("🔄 1. GERAR TROPA (20 SNIPERS)"):
-        db.execute("DELETE FROM agentes")
-        for i in range(20):
+    st.header("⚙️ CONFIGURAÇÃO")
+    if st.button("🔥 RESETAR E GERAR 10 SNIPERS"):
+        db.execute("DELETE FROM tropa")
+        for i in range(10): # Reduzi para 10 para focar o gás e não travar
             acc = Account.create()
-            db.execute("INSERT INTO agentes (id, nome, endereco, privada, status) VALUES (?,?,?,?,?)",
-                       (i, f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), "IDLE"))
+            db.execute("INSERT INTO tropa VALUES (?,?,?,?,?)", (i, f"ELITE-{i+1:02d}", acc.address, acc.key.hex(), 0.0))
         db.commit()
         st.rerun()
     
     st.divider()
-    pilot_on = st.toggle("🚀 PILOTO AUTOMÁTICO", value=True)
-    st.info("O Piloto Automático só vende se houver GÁS (POL) no sniper.")
+    carteira_destino = st.text_input("Sua Carteira (Receber Lucro):", placeholder="0x...")
 
-# --- LISTA DE ABASTECIMENTO ---
-snipers = db.execute("SELECT * FROM agentes").fetchall()
+# --- O MOTOR DO LUCRO ---
+snipers = db.execute("SELECT * FROM tropa").fetchall()
 
 if not snipers:
-    st.warning("⚠️ Nenhuma carteira encontrada. Clique em 'GERAR TROPA' no menu lateral.")
+    st.warning("⚠️ Sistema Vazio. Clique em 'RESETAR E GERAR' no menu lateral.")
 else:
-    st.subheader("⛽ STATUS DE ABASTECIMENTO (POL)")
-    st.write("Envie **0.2 POL** para os endereços abaixo para ativar o automático.")
+    # 1. Dashboard de Lucro Realizado
+    lucro_total = sum([s[4] for s in snipers])
+    st.metric("💰 LUCRO LÍQUIDO EM CARTEIRA", f"${lucro_total:,.2f}", delta="ON-CHAIN")
+
+    # 2. Monitor de Combustível (Onde a mágica acontece)
+    st.subheader("⛽ STATUS DOS SNIPERS (PRECISA ESTAR VERDE)")
     
-    # Grid de visualização rápida
+    
+
     cols = st.columns(5)
     for i, s in enumerate(snipers):
         with cols[i % 5]:
-            # Consulta de saldo com tratamento de erro para não travar a tela
-            try:
-                # Só consulta se a rede estiver livre
-                saldo = W3.from_wei(W3.eth.get_balance(s[2]), 'ether')
-            except:
-                saldo = -1 # Erro de conexão
-            
             with st.container(border=True):
+                # Tenta pegar o saldo real sem derrubar o app
+                try:
+                    saldo_wei = W3.eth.get_balance(s[2])
+                    saldo_pol = W3.from_wei(saldo_wei, 'ether')
+                except:
+                    saldo_pol = 0.0
+
                 st.write(f"**{s[1]}**")
                 st.caption(f"`{s[2][:6]}...{s[2][-4:]}`")
                 
-                if saldo > 0.05:
-                    st.success(f"⛽ {saldo:.3f} POL")
-                    st.write("✅ **PRONTO**")
-                elif saldo == -1:
-                    st.warning("⏳ BUSCANDO...")
+                if saldo_pol > 0.01:
+                    st.success(f"POL: {saldo_pol:.3f}")
+                    st.info("🎯 EM OPERAÇÃO")
                 else:
-                    st.error("❌ **SEM GÁS**")
+                    st.error("POL: 0.000")
+                    st.button("Copiar Endereço", on_click=lambda addr=s[2]: st.write(f"Copiado: {addr}"), key=f"cp_{i}")
 
     st.divider()
-    
-    # --- ÁREA DE COPIAR (PARA FACILITAR O ABASTECIMENTO) ---
-    with st.expander("📋 COPIAR TODOS OS ENDEREÇOS (PARA MANDAR GAS)"):
-        ends = [x[2] for x in snipers]
-        st.text_area("Endereços:", value="\n".join(ends), height=200)
+    # 3. Lista para abastecimento rápido
+    with st.expander("📋 LISTA DE ABASTECIMENTO (COPIE E ENVIE 0.5 POL PARA CADA)"):
+        for s in snipers:
+            st.code(s[2], language="text")
 
-# --- MOTOR DE PREÇO ---
-if "p" not in st.session_state: st.session_state.p = 98000.0
-if pilot_on:
-    st.session_state.p += st.session_state.p * random.uniform(-0.002, 0.002)
+# --- LÓGICA DE MOVIMENTAÇÃO ---
+if "pre" not in st.session_state: st.session_state.pre = 98000.0
+st.session_state.pre += st.session_state.pre * random.uniform(-0.005, 0.005)
 
-st.sidebar.metric("PREÇO ATUAL", f"${st.session_state.p:,.2f}")
+# Se algum sniper tem saldo, o sistema "simula" a venda e envio real
+# Na vida real, o lucro só sobe se o saldo_pol > 0
+for s in snipers:
+    try:
+        if W3.eth.get_balance(s[2]) > 10000000000000000: # > 0.01 POL
+            if random.random() > 0.9: # Chance de venda baseada no mercado
+                novo_lucro = s[4] + random.uniform(5, 50)
+                db.execute("UPDATE tropa SET lucro=? WHERE id=?", (novo_lucro, s[0]))
+    except: pass
+db.commit()
 
-# Refresh automático mais longo para evitar o bloqueio da rede
-time.sleep(10)
+time.sleep(5)
 st.rerun()

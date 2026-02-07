@@ -4,21 +4,25 @@ from eth_account import Account
 import sqlite3, time, requests, pandas as pd
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GUARDION OMNI v12.1", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="GUARDION OMNI v12.2", layout="wide")
 
-# --- LOGIN (SECRETS) ---
+# --- LOGIN SEGURO ---
+# Define a senha mestra vinda do secrets ou padrão
+SENHA_MESTRA = st.secrets.get("SECRET_KEY", "mestre2026")
+
 if "logado" not in st.session_state: st.session_state.logado = False
+
 if not st.session_state.logado:
-    st.title("🔐 QG GUARDION v12.1")
-    senha = st.text_input("Chave do QG:", type="password")
+    st.title("🔐 QG GUARDION v12.2")
+    senha_input = st.text_input("Chave do QG:", type="password")
     if st.button("ENTRAR"):
-        if senha == st.secrets.get("SECRET_KEY", "mestre2026"):
+        if senha_input == SENHA_MESTRA:
             st.session_state.logado = True
             st.rerun()
-        else: st.error("Incorreta")
+        else: st.error("Chave Incorreta")
     st.stop()
 
-# --- CONEXÃO BANCO DE DADOS ---
+# --- BANCO DE DADOS ---
 db = sqlite3.connect('guardion_v6.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes_v6 
                 (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
@@ -27,87 +31,80 @@ db.commit()
 
 # --- MOTOR DE PREÇO ---
 def pegar_preco():
-    try: return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()['price'])
+    try: 
+        return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3).json()['price'])
     except: return None
 
-# --- MOTOR DE EXECUÇÃO ATIVA (TAKE PROFIT INFINITO) ---
-def processar_operacoes(btc_atual, porcentagem_tp):
+# --- ENGINE DE OPERAÇÃO ATIVA INFINITA ---
+def rodar_engine(btc_atual, tp_porcentagem):
     agentes = db.execute("SELECT * FROM agentes_v6").fetchall()
     for ag in agentes:
         id_ag, nome, _, _, alvo, status, preco_compra, _ = ag
         
-        # 🟢 GATILHO DE COMPRA (Preço caiu abaixo do Alvo do Grid)
+        # COMPRA AUTOMÁTICA
         if btc_atual <= alvo and status == "VIGILANCIA":
-            nova_acao = f"✅ Comprado a ${btc_atual:,.2f}"
             db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=?, ultima_acao=? WHERE id=?", 
-                       (btc_atual, nova_acao, id_ag))
+                       (btc_atual, f"Compra em ${btc_atual:,.2f}", id_ag))
             db.commit()
-            st.toast(f"🎯 {nome}: COMPRADO!")
+            st.toast(f"🎯 {nome} COMPROU!")
 
-        # 🔴 GATILHO DE VENDA (TAKE PROFIT ATIVO INFINITO)
+        # TAKE PROFIT INFINITO (VENDA)
         elif status == "COMPRADO":
-            alvo_venda = preco_compra * (1 + (porcentagem_tp / 100))
-            if btc_atual >= alvo_venda:
-                lucro = btc_atual - preco_compra
-                nova_acao = f"💰 Lucro: ${lucro:,.2f} | Resetando..."
+            meta = preco_compra * (1 + (tp_porcentagem / 100))
+            if btc_atual >= meta:
                 # Volta para VIGILANCIA para reentrada infinita
                 db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, ultima_acao=? WHERE id=?", 
-                           (nova_acao, id_ag))
+                           (f"Lucro em ${btc_atual:,.2f} | Reiniciado", id_ag))
                 db.commit()
-                st.toast(f"💸 {nome}: TAKE PROFIT BATIDO!")
+                st.toast(f"💰 {nome} LUCROU E REINICIOU!")
 
-# --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v12.1 | 50 SNIPERS")
+# --- DASHBOARD ---
+st.title("🛡️ COMMANDER OMNI v12.2")
 btc = pegar_preco()
 
 if btc:
-    # Telemetria Superior
-    c1, c2, c3 = st.columns(3)
-    c1.metric("BTC ATUAL", f"${btc:,.2f}")
-    
+    st.metric("BTC/USDT", f"${btc:,.2f}")
+
     with st.sidebar:
-        st.header("⚙️ COMANDO CENTRAL")
-        tp_input = st.slider("Take Profit (%)", 0.5, 10.0, 2.0)
-        distancia = st.number_input("Distância Grid ($)", value=150)
+        st.header("⚙️ CONFIGURAÇÕES")
+        # PK agora fica na sessão para não sumir no refresh
+        if "pk_gas" not in st.session_state: st.session_state.pk_gas = ""
+        st.session_state.pk_gas = st.text_input("Sua PK (Gás):", value=st.session_state.pk_gas, type="password")
         
-        if st.button("🚀 REINICIALIZAR 50 SNIPERS"):
+        tp = st.slider("Take Profit (%)", 0.1, 5.0, 1.5)
+        dist = st.number_input("Espaçamento Grid ($)", value=100)
+
+        if st.button("🚀 LANÇAR BATALHÃO"):
             db.execute("DELETE FROM agentes_v6")
-            novos = [(f"SNPR-{i+1:02d}", Account.create().address, Account.create().key.hex(), btc - (i * distancia), "VIGILANCIA", 0.0, "Pronto") for i in range(50)]
-            db.executemany("INSERT INTO agentes_v6 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
+            for i in range(50):
+                acc = Account.create()
+                db.execute("INSERT INTO agentes_v6 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)",
+                           (f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), btc - (i * dist), "VIGILANCIA", 0.0, "Pronto"))
             db.commit()
+            st.success("50 Agentes em campo!")
             st.rerun()
 
-    # Processamento em tempo real
-    processar_operacoes(btc, tp_input)
+    # Executa a lógica de trade
+    rodar_engine(btc, tp)
 
-    # Painel de Monitoramento
-    tab1, tab2 = st.tabs(["🎯 Monitor do Grid", "📊 Relatório de Operações"])
-    
+    # Visualização
+    tab1, tab2 = st.tabs(["Monitor", "Dados"])
     with tab1:
-        agentes = db.execute("SELECT * FROM agentes_v6").fetchall()
-        if agentes:
-            cols = st.columns(5)
-            for idx, ag in enumerate(agentes):
-                with cols[idx % 5]:
-                    cor = "green" if ag[5] == "COMPRADO" else "normal"
-                    with st.container(border=True):
-                        st.markdown(f"### {ag[1]}")
-                        st.caption(f"🎯 Alvo Compra: ${ag[4]:,.0f}")
-                        if ag[5] == "COMPRADO":
-                            st.write(f"📈 P. Compra: **${ag[6]:,.0f}**")
-                            st.write(f"🚀 Alvo TP: **${ag[6]*(1+(tp_input/100)):,.0f}**")
-                        else:
-                            st.info("Aguardando Preço...")
-        else: st.warning("Exército desativado. Use o menu lateral.")
+        ags = db.execute("SELECT * FROM agentes_v6").fetchall()
+        cols = st.columns(5)
+        for i, a in enumerate(ags):
+            with cols[i % 5]:
+                with st.container(border=True):
+                    st.write(f"**{a[1]}**")
+                    st.caption(f"Status: {a[5]}")
+                    if a[5] == "COMPRADO": st.success(f"Dono de BTC")
 
     with tab2:
-        if agentes:
-            df = pd.DataFrame(agentes, columns=['ID', 'Nome', 'Endereço', 'Privada', 'Alvo', 'Status', 'Preço Compra', 'Última Ação'])
-            st.dataframe(df[['Nome', 'Status', 'Preço Compra', 'Última Ação']], use_container_width=True)
+        df = pd.DataFrame(ags, columns=['ID', 'Nome', 'End', 'Key', 'Alvo', 'Status', 'P.Compra', 'Ação'])
+        st.dataframe(df[['Nome', 'Status', 'Alvo', 'Ação']])
 
 else:
-    st.error("Falha na conexão com a rede Binance/Kraken.")
+    st.warning("⚠️ Aguardando sinal da rede...")
 
-# Refresh Automático para o Loop Infinito
-time.sleep(30)
+time.sleep(15)
 st.rerun()

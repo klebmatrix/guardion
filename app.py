@@ -1,73 +1,60 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, requests
-import pandas as pd
-from datetime import datetime
+import time
 
-# --- CONFIGURAÇÃO RPC ---
-st.set_page_config(page_title="GUARDION RECOVERY", layout="wide")
-RPC_URL = "https://polygon-rpc.com" 
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+# --- SETUP DA REDE ---
+st.set_page_config(page_title="GUARDION INDUSTRIAL", layout="wide")
+# Usando um RPC alternativo para evitar bloqueios
+w3 = Web3(Web3.HTTPProvider("https://polygon.drpc.org"))
 
-# --- BANCO DE DADOS (COM TRATAMENTO DE TRAVAMENTO) ---
-def init_db():
-    try:
-        # Tenta conectar ao banco atual
-        conn = sqlite3.connect('guardion_data_v2.db', check_same_thread=False, timeout=10)
-        conn.execute('''CREATE TABLE IF NOT EXISTS modulos 
-                        (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                        alvo REAL, status TEXT, ultima_acao TEXT)''')
-        conn.commit()
-        return conn
-    except:
-        st.error("🚨 O Banco de Dados travou. Tentando recuperação automática...")
-        return None
+st.title("🛡️ COMMANDER OMNI | v10.9")
 
-db = init_db()
-
-# --- INTERFACE ---
-st.title("🛡️ COMMANDER OMNI | RECOVERY v10.8")
-
+# --- ÁREA DE CONEXÃO (SEM SECRETS) ---
 with st.sidebar:
-    st.header("🔐 Autenticação")
-    pk_input = st.text_input("Sua PK_01:", type="password")
+    st.header("🔐 Acesso Mestre")
+    # Usamos uma chave de sessão para garantir que o input seja processado
+    pk_raw = st.text_input("Cole sua PK_01 aqui:", type="password", key="pk_input_main")
     
-    st.divider()
-    st.header("⚙️ Comandos de Emergência")
-    if st.button("🗑️ APAGAR TUDO E REINICIAR"):
-        if db:
-            db.execute("DELETE FROM modulos")
-            db.commit()
-            st.rerun()
+    btn_conectar = st.button("CONECTAR AGORA")
 
-# --- LÓGICA DE LANÇAMENTO ---
-if st.sidebar.button("🚀 LANÇAR 25 NOVOS AGENTES"):
-    if db:
-        novos = []
-        p_topo = 102500.0
-        for i in range(25):
-            acc = Account.create()
-            p_alvo = p_topo - (i * 200)
-            novos.append((f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), p_alvo, "VIGILANCIA", "Aguardando"))
+# --- LÓGICA DE VALIDAÇÃO ---
+if pk_raw or btn_conectar:
+    try:
+        # Limpeza radical da string
+        pk_clean = str(pk_raw).strip().replace('"', '').replace("'", "").replace(" ", "")
         
-        try:
-            db.executemany("INSERT INTO modulos (nome, endereco, privada, alvo, status, ultima_acao) VALUES (?,?,?,?,?,?)", novos)
-            db.commit()
-            st.success("25 Agentes criados com sucesso!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erro ao salvar: {e}")
+        if len(pk_clean) == 64 and not pk_clean.startswith("0x"):
+            pk_clean = "0x" + pk_clean
+            
+        # Teste de conexão real
+        acc = Account.from_key(pk_clean)
+        saldo_wei = w3.eth.get_balance(acc.address)
+        saldo_pol = round(w3.from_wei(saldo_wei, 'ether'), 2)
+        
+        st.success(f"✅ Conectado à Wallet: {acc.address}")
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Saldo na Mestre", f"{saldo_pol} POL")
+        
+        if saldo_pol < 1.0:
+            st.warning("⚠️ Saldo baixo para abastecer 25 agentes.")
+            
+        # --- SEÇÃO DE COMANDO ---
+        st.divider()
+        st.subheader("🚀 Comando de Batalhão")
+        if st.button("GERAR ENDEREÇOS DOS 25 AGENTES"):
+            st.info("Gerando chaves efêmeras para operação...")
+            for i in range(25):
+                novo_agente = Account.create()
+                st.code(f"Agente {i+1}: {novo_agente.address}", language="text")
+                # Aqui você enviaria os 0.5 POL para cada um
+                
+    except Exception as e:
+        st.error(f"❌ Erro na Chave: Verifique se copiou todos os 64 caracteres. (Erro: {e})")
+else:
+    st.info("Aguardando inserção da Chave Privada (PK_01) na barra lateral para iniciar.")
 
-# --- MONITOR ---
-if db:
-    agentes = db.execute("SELECT * FROM modulos").fetchall()
-    if agentes:
-        st.subheader(f"📡 Batalhão Ativo ({len(agentes)} Agentes)")
-        df = pd.DataFrame(agentes, columns=['ID', 'Nome', 'Endereço', 'Privada', 'Alvo', 'Status', 'Ação'])
-        st.dataframe(df.drop(columns=['Privada']), use_container_width=True)
-    else:
-        st.info("Nenhum agente no banco de dados.")
-
-# Pausa para não estressar o servidor
-time.sleep(30)
+# Rodapé Técnico
+st.divider()
+st.caption("Conectado via Polygon dRPC Mainnet")

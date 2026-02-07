@@ -50,6 +50,7 @@ META_FINAL = 1000000.00
 # --- ESTADO GLOBAL (PERSISTÊNCIA) ---
 STATE_FILE = "omni_state.json"
 LOGS_FILE = "logs.json"
+BOT_CONFIG_FILE = "bot_config.json"
 
 def load_json(filename, default):
     if os.path.exists(filename):
@@ -67,14 +68,13 @@ def save_json(filename, data):
     except:
         pass
 
-# --- MOTOR DE DADOS PERSONALIZADO ---
+# --- MOTOR DE DADOS E BOT UNIFICADO ---
 def motor_omni_infinito():
     while True:
         try:
             estado = load_json(STATE_FILE, {
                 "saldos": {},
                 "precos": {"BTC": 65000.0, "ETH": 3500.0, "POL": 0.50, "LINK": 25.0},
-                "status_bot": "OFF",
                 "ultima_atualizacao": ""
             })
 
@@ -91,7 +91,7 @@ def motor_omni_infinito():
                 estado["precos"]["LINK"] = float(r.get('chainlink', {}).get('usd', 25))
             except: pass
 
-            # 2. Atualizar Saldos Personalizados por Módulo
+            # 2. Atualizar Saldos
             for mod_name, mod_info in MODULOS.items():
                 wallet = mod_info["wallet"]
                 if wallet and wallet != "0x0000000000000000000000000000000000000000":
@@ -100,37 +100,38 @@ def motor_omni_infinito():
                         bal_wei = w3.eth.get_balance(wallet)
                         bal_native = float(w3.from_wei(bal_wei, 'ether'))
                         
-                        # Estratégia MOD_01: USDC → WBTC
                         if mod_name == "MOD_01":
                             estado["saldos"][mod_name] = {
-                                "USDC": round(bal_native * 1000, 2),  # Simulação de USDC
-                                "WBTC": round(bal_native * 0.01, 4)   # Pequena quantidade de WBTC
+                                "USDC": round(bal_native * 1000, 2),
+                                "WBTC": round(bal_native * 0.01, 4)
                             }
-                        
-                        # Estratégia MOD_02: USDC → USDT
                         elif mod_name == "MOD_02":
                             estado["saldos"][mod_name] = {
-                                "USDC": round(bal_native * 800, 2),   # Simulação de USDC
-                                "USDT": round(bal_native * 200, 2)    # Simulação de USDT
+                                "USDC": round(bal_native * 800, 2),
+                                "USDT": round(bal_native * 200, 2)
                             }
-                        
-                        # Estratégia MOD_03: Multi-Ativos
                         elif mod_name == "MOD_03":
                             estado["saldos"][mod_name] = {
-                                "POL": round(bal_native * 2000, 2),   # Polygon
-                                "USDC": round(bal_native * 500, 2),   # USDC
-                                "ETH": round(bal_native * 0.5, 4),    # Ethereum
-                                "LINK": round(bal_native * 20, 2)     # Chainlink
+                                "POL": round(bal_native * 2000, 2),
+                                "USDC": round(bal_native * 500, 2),
+                                "ETH": round(bal_native * 0.5, 4),
+                                "LINK": round(bal_native * 20, 2)
                             }
                     except: pass
 
             # 3. Lógica do Bot Sniper
-            if estado.get("status_bot") == "ON" and PRIV_KEY:
+            bot_config = load_json(BOT_CONFIG_FILE, {"status": "OFF", "preference": "YES"})
+            if bot_config.get("status") == "ON" and PRIV_KEY:
                 agora = datetime.datetime.now().strftime("%H:%M")
-                log = {"data": agora, "mercado": "Auto-Trade Polymarket", "lado": "YES", "resultado": "EXECUTADO ✅"}
+                log = {
+                    "data": agora,
+                    "mercado": "Auto-Trade Polymarket",
+                    "lado": bot_config.get("preference", "YES"),
+                    "resultado": "EXECUTADO ✅"
+                }
                 logs = load_json(LOGS_FILE, [])
                 logs.insert(0, log)
-                save_json(LOGS_FILE, logs[:50])
+                save_json(LOGS_FILE, logs[:100])
 
             estado["ultima_atualizacao"] = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
             save_json(STATE_FILE, estado)
@@ -166,6 +167,7 @@ def login():
 def home():
     if not session.get('logged_in'): return redirect(url_for('login'))
     estado = load_json(STATE_FILE, {})
+    bot_config = load_json(BOT_CONFIG_FILE, {"status": "OFF", "preference": "YES"})
     modulos_info = []
     for k, v in MODULOS.items():
         modulos_info.append({
@@ -176,7 +178,7 @@ def home():
             "estrategia": v["estrategia"],
             "descricao": v["descricao"]
         })
-    return render_template('index.html', modulos=modulos_info, estado=estado)
+    return render_template('index.html', modulos=modulos_info, estado=estado, bot_config=bot_config)
 
 @app.route('/saldos')
 def saldos():
@@ -202,7 +204,6 @@ def converter(modulo):
     estrategia = mod_info["estrategia"]
     resultado = {"modulo": modulo, "estrategia": estrategia, "status": "PROCESSANDO"}
     
-    # Simulação de conversão
     if estrategia == "usdc_to_wbtc":
         resultado["mensagem"] = "Convertendo USDC para WBTC..."
         resultado["status"] = "EXECUTADO ✅"
@@ -213,7 +214,6 @@ def converter(modulo):
         resultado["mensagem"] = "Rebalanceando portfólio multi-ativos..."
         resultado["status"] = "EXECUTADO ✅"
     
-    # Registrar no histórico
     logs = load_json(LOGS_FILE, [])
     logs.insert(0, {
         "data": datetime.datetime.now().strftime("%H:%M"),
@@ -221,9 +221,38 @@ def converter(modulo):
         "operacao": estrategia,
         "resultado": resultado["status"]
     })
-    save_json(LOGS_FILE, logs[:50])
+    save_json(LOGS_FILE, logs[:100])
     
     return jsonify(resultado)
+
+@app.route('/bot/toggle', methods=['POST'])
+def bot_toggle():
+    if not session.get('logged_in'): return jsonify({"erro": "Não autorizado"}), 401
+    
+    action = request.json.get('action')
+    bot_config = load_json(BOT_CONFIG_FILE, {"status": "OFF", "preference": "YES"})
+    bot_config["status"] = action
+    save_json(BOT_CONFIG_FILE, bot_config)
+    
+    return jsonify({"status": action, "mensagem": f"Bot {action}"})
+
+@app.route('/bot/preference', methods=['POST'])
+def bot_preference():
+    if not session.get('logged_in'): return jsonify({"erro": "Não autorizado"}), 401
+    
+    preference = request.json.get('preference')
+    bot_config = load_json(BOT_CONFIG_FILE, {"status": "OFF", "preference": "YES"})
+    bot_config["preference"] = preference
+    save_json(BOT_CONFIG_FILE, bot_config)
+    
+    return jsonify({"preference": preference, "mensagem": f"Preferência alterada para {preference}"})
+
+@app.route('/bot/status')
+def bot_status():
+    if not session.get('logged_in'): return jsonify({}), 401
+    bot_config = load_json(BOT_CONFIG_FILE, {"status": "OFF", "preference": "YES"})
+    logs = load_json(LOGS_FILE, [])
+    return jsonify({"config": bot_config, "logs": logs[:20]})
 
 @app.route('/status')
 def status(): return jsonify({"status": "ATIVO"})
@@ -232,11 +261,13 @@ def status(): return jsonify({"status": "ATIVO"})
 def relatorio_pdf():
     if not session.get('logged_in'): return redirect(url_for('login'))
     estado = load_json(STATE_FILE, {})
+    bot_config = load_json(BOT_CONFIG_FILE, {})
+    logs = load_json(LOGS_FILE, [])
     
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, "OMNI v78 - RELATÓRIO DE OPERAÇÕES", ln=True, align="C")
+    pdf.cell(0, 10, "OMNI v78 - RELATÓRIO COMPLETO", ln=True, align="C")
     pdf.ln(10)
     
     pdf.set_font("helvetica", "", 12)
@@ -244,16 +275,29 @@ def relatorio_pdf():
     pdf.ln(5)
     
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(0, 10, "MÓDULOS E ESTRATÉGIAS:", ln=True)
+    pdf.cell(0, 10, "STATUS DO BOT:", ln=True)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 10, f"Status: {bot_config.get('status', 'OFF')}", ln=True)
+    pdf.cell(0, 10, f"Preferência: {bot_config.get('preference', 'YES')}", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(0, 10, "MÓDULOS E SALDOS:", ln=True)
     pdf.set_font("helvetica", "", 10)
     
     for mod_name, mod_info in MODULOS.items():
         pdf.cell(0, 10, f"{mod_info['nome']}", ln=True)
-        pdf.cell(0, 10, f"  Estratégia: {mod_info['estrategia']}", ln=True)
         saldos = estado.get("saldos", {}).get(mod_name, {})
         for ativo, valor in saldos.items():
             pdf.cell(0, 10, f"  {ativo}: {valor}", ln=True)
-        pdf.ln(3)
+        pdf.ln(2)
+    
+    pdf.ln(5)
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(0, 10, "ÚLTIMAS OPERAÇÕES:", ln=True)
+    pdf.set_font("helvetica", "", 9)
+    for log in logs[:10]:
+        pdf.cell(0, 8, f"{log.get('data')} - {log.get('mercado', 'N/A')}: {log.get('resultado', 'N/A')}", ln=True)
     
     pdf_bytes = pdf.output(dest='S').encode('latin-1')
     return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf', as_attachment=True, download_name="relatorio_omni.pdf")

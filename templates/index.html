@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OMNI v78 - Dashboard Personalizado</title>
+    <title>OMNI v78 - Dashboard com Bot Sniper</title>
     <style>
         * {
             margin: 0;
@@ -33,8 +33,123 @@
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: auto;
+        }
+        
+        .bot-control-panel {
+            background: #0a0a0a;
+            border: 2px solid #f3ba2f;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 0 20px rgba(243, 186, 47, 0.2);
+        }
+        
+        .bot-control-panel h2 {
+            color: #f3ba2f;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+        
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .control-item {
+            background: #111;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #333;
+        }
+        
+        .control-item label {
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 10px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s;
+        }
+        
+        .btn-on {
+            background: #00ff00;
+            color: #000;
+        }
+        
+        .btn-on:hover {
+            background: #00dd00;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+        }
+        
+        .btn-off {
+            background: #ff4444;
+            color: white;
+        }
+        
+        .btn-off:hover {
+            background: #dd0000;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.5);
+        }
+        
+        .btn-yes {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-yes:hover {
+            background: #0056b3;
+        }
+        
+        .btn-no {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .btn-no:hover {
+            background: #e68900;
+        }
+        
+        .status-display {
+            background: #111;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #f3ba2f;
+        }
+        
+        .status-display p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        
+        .status-label {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        
+        .status-value {
+            color: #f3ba2f;
+            font-weight: bold;
+            font-size: 16px;
         }
         
         .modules-grid {
@@ -57,12 +172,11 @@
             box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
         }
         
-        .card h2 {
+        .card h3 {
             color: #f3ba2f;
             margin-bottom: 5px;
-            font-size: 18px;
+            font-size: 16px;
             text-transform: uppercase;
-            letter-spacing: 1px;
         }
         
         .card .descricao {
@@ -87,10 +201,6 @@
             border-bottom: 1px solid #222;
         }
         
-        .balance-box div:last-child {
-            border-bottom: none;
-        }
-        
         .balance-box span {
             color: #00ff00;
             font-weight: bold;
@@ -111,22 +221,18 @@
             border-radius: 5px;
         }
         
-        .btn {
+        .btn-converter {
             width: 100%;
             padding: 12px;
+            background: #f3ba2f;
+            color: #000;
             border: none;
             border-radius: 5px;
             font-weight: bold;
             cursor: pointer;
             text-transform: uppercase;
             letter-spacing: 1px;
-            transition: all 0.3s;
             margin-bottom: 10px;
-        }
-        
-        .btn-converter {
-            background: #f3ba2f;
-            color: #000;
         }
         
         .btn-converter:hover {
@@ -135,7 +241,6 @@
         }
         
         .status-area {
-            margin-top: 10px;
             padding: 10px;
             background: #111;
             border-radius: 5px;
@@ -163,18 +268,12 @@
             text-decoration: underline;
         }
         
-        .estrategia-badge {
-            display: inline-block;
-            background: #1a3a1a;
-            color: #00ff00;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 11px;
-            margin-bottom: 10px;
-        }
-        
         @media (max-width: 768px) {
             .modules-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .control-grid {
                 grid-template-columns: 1fr;
             }
             
@@ -187,19 +286,46 @@
 <body>
     <div class="header">
         <h1>OMNI v78</h1>
-        <div>Dashboard de Monitoramento em Tempo Real com Estratégias Personalizadas</div>
+        <div>Dashboard Integrado: Módulos + Bot Sniper Polymarket</div>
     </div>
     
     <div class="container">
+        <!-- PAINEL DE CONTROLE DO BOT -->
+        <div class="bot-control-panel">
+            <h2>🤖 Controle do Bot Sniper</h2>
+            <div class="control-grid">
+                <div class="control-item">
+                    <label>Status do Bot</label>
+                    <div class="btn-group">
+                        <button class="btn btn-on" onclick="toggleBot('ON')">⚡ LIGAR</button>
+                        <button class="btn btn-off" onclick="toggleBot('OFF')">⏹️ DESLIGAR</button>
+                    </div>
+                </div>
+                
+                <div class="control-item">
+                    <label>Preferência de Operação</label>
+                    <div class="btn-group">
+                        <button class="btn btn-yes" onclick="setPreference('YES')">📈 YES</button>
+                        <button class="btn btn-no" onclick="setPreference('NO')">📉 NO</button>
+                    </div>
+                </div>
+                
+                <div class="status-display">
+                    <p><span class="status-label">Status Atual:</span></p>
+                    <p><span class="status-value" id="bot-status">{{ bot_config.status }}</span></p>
+                    <p style="margin-top: 10px;"><span class="status-label">Preferência:</span></p>
+                    <p><span class="status-value" id="bot-preference">{{ bot_config.preference }}</span></p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- MÓDULOS DE CONVERSÃO -->
+        <h2 style="color: #f3ba2f; margin-bottom: 20px;">📊 Módulos de Conversão</h2>
         <div class="modules-grid">
             {% for mod in modulos %}
             <div class="card">
-                <h2 id="title-{{ mod.nome }}">{{ mod.nome_display }}</h2>
+                <h3>{{ mod.nome_display }}</h3>
                 <div class="descricao">{{ mod.descricao }}</div>
-                
-                <div class="estrategia-badge">
-                    📊 {{ mod.estrategia }}
-                </div>
                 
                 <div class="balance-box" id="balance-{{ mod.nome }}">
                     {% for ativo in mod.ativos %}
@@ -214,7 +340,7 @@
                     <img src="/qr/{{ mod.wallet }}" alt="QR Code" width="120">
                 </div>
                 
-                <button class="btn btn-converter" id="btn-{{ mod.nome }}" onclick="executarConversao('{{ mod.nome }}')">
+                <button class="btn-converter" onclick="executarConversao('{{ mod.nome }}')">
                     🔄 CONVERTER AGORA
                 </button>
                 
@@ -230,6 +356,34 @@
     </div>
     
     <script>
+        async function toggleBot(action) {
+            try {
+                const res = await fetch('/bot/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action })
+                });
+                const data = await res.json();
+                document.getElementById('bot-status').innerText = data.status;
+            } catch (e) {
+                console.log("Erro ao alternar bot:", e);
+            }
+        }
+        
+        async function setPreference(pref) {
+            try {
+                const res = await fetch('/bot/preference', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ preference: pref })
+                });
+                const data = await res.json();
+                document.getElementById('bot-preference').innerText = data.preference;
+            } catch (e) {
+                console.log("Erro ao alterar preferência:", e);
+            }
+        }
+        
         async function atualizarSaldos() {
             try {
                 const res = await fetch('/saldos');
@@ -250,7 +404,7 @@
         
         async function executarConversao(modulo) {
             const status = document.getElementById('status-' + modulo);
-            const btn = document.getElementById('btn-' + modulo);
+            const btn = event.target;
             
             status.innerText = "⏳ Processando conversão...";
             status.style.color = "#f3ba2f";

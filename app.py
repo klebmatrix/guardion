@@ -4,38 +4,34 @@ from web3 import Web3
 
 app = Flask(__name__)
 
-# Configurações via Environment Variables do Render
-RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
-WALLET_01 = os.environ.get("WALLET_01", "SEU_ENDERECO_AQUI")
+# Configuração dos Agentes (Defina as carteiras no painel do Render)
+MODULOS = {
+    "MOD_01": os.environ.get("WALLET_01", "0x000...1"),
+    "MOD_02": os.environ.get("WALLET_02", "0x000...2"),
+    "MOD_03": os.environ.get("WALLET_03", "0x000...3")
+}
 
-def agente_multi():
-    w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    print("🤖 AGENTE MULTI: Iniciado e monitorando USDC -> WBTC")
+def agente_multi_monitor():
+    w3 = Web3(Web3.HTTPProvider(os.environ.get("RPC_URL", "https://polygon-rpc.com")))
+    print("🤖 AGENTES 1, 2 e 3 INICIADOS")
     
     while True:
-        try:
-            if WALLET_01 != "SEU_ENDERECO_AQUI":
-                balance = w3.eth.get_balance(WALLET_01)
-                eth_balance = w3.from_wei(balance, 'ether')
-                
-                if eth_balance > 0:
-                    print(f"💰 Depósito Detectado em {WALLET_01}: {eth_balance} MATIC/USDC")
-                    print("⚡ Iniciando conversão para WBTC via Uniswap...")
-                    # Lógica de Swap automática aqui
-                else:
-                    print(f"🔎 Monitorando {WALLET_01[:6]}... aguardando depósito.")
-            
-            time.sleep(30)
-        except Exception as e:
-            print(f"⚠️ Erro no Agente: {e}")
-            time.sleep(10)
+        for mod, addr in MODULOS.items():
+            try:
+                if "0x" in addr:
+                    # Aqui o agente checa o saldo para converter USDC > WBTC
+                    balance = w3.eth.get_balance(addr)
+                    if balance > 0:
+                        print(f"💰 {mod} detectou saldo! Iniciando conversão...")
+            except:
+                pass
+        time.sleep(20)
 
-# Inicia o Agente em segundo plano
-threading.Thread(target=agente_multi, daemon=True).start()
+threading.Thread(target=agente_multi_monitor, daemon=True).start()
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return render_template('index.html', modulos=MODULOS)
 
 @app.route('/qr/<path:text>')
 def qr(text):

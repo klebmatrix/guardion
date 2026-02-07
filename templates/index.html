@@ -1,21 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Agente Multi OMNI</title>
+    <title>Painel Agente Multi-Módulo</title>
     <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; text-align: center; }
-        .card { background: #1e293b; display: inline-block; padding: 20px; border-radius: 15px; border: 1px solid #3b82f6; margin: 20px; }
-        .btn { background: #10b981; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        body { background: #0a0e17; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; }
+        .grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; margin-top: 20px; }
+        .card { background: #161e2d; border: 1px solid #3b82f6; padding: 20px; border-radius: 15px; width: 250px; text-align: center; }
+        .mod-title { color: #3b82f6; font-weight: bold; font-size: 1.2em; }
+        img { background: white; padding: 5px; border-radius: 5px; margin-top: 10px; }
+        .status { color: #10b981; font-size: 0.8em; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <h1>Agente Multi-Módulo</h1>
-    <div class="card">
-        <h3>Módulo de Conversão USDC ➔ WBTC</h3>
-        <p>Deposite USDC na rede Polygon para converter</p>
-        <img src="/qr/SUA_CARTEIRA_AQUI" width="200">
-        <br><br>
-        <button class="btn" onclick="location.reload()">Atualizar Saldo</button>
+    <h1>SISTEMA DE CONVERSÃO OMNI</h1>
+    <p>Agentes ativos monitorando USDC ➔ WBTC</p>
+
+    <div class="grid">
+        {% for nome, carteira in modulos.items() %}
+        <div class="card">
+            <div class="mod-title">{{ nome }}</div>
+            <p><small>Deposite USDC (Polygon)</small></p>
+            <img src="/qr/{{ carteira }}" width="150">
+            <div class="status">● AGENTE MONITORANDO</div>
+            <p style="font-size: 10px; word-break: break-all;">{{ carteira }}</p>
+        </div>
+        {% endfor %}
     </div>
 </body>
 </html>

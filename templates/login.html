@@ -1,126 +1,78 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OMNI v78 - Login</title>
+    <title>ACESSO RESTRITO | GUARDION</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            background: #000;
-            color: #f3ba2f;
-            font-family: 'Arial', sans-serif;
+            background-color: #050505;
+            color: #00f2ff;
+            font-family: 'JetBrains Mono', monospace;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
+            margin: 0;
+            overflow: hidden;
         }
-        
         .login-container {
-            background: #0a0a0a;
-            border: 2px solid #f3ba2f;
-            border-radius: 15px;
+            background: #0d0d0d;
             padding: 40px;
+            border-radius: 12px;
+            border: 1px solid #1a1a1a;
+            box-shadow: 0 0 30px rgba(0, 242, 255, 0.1);
+            text-align: center;
             width: 100%;
             max-width: 350px;
-            box-shadow: 0 0 30px rgba(243, 186, 47, 0.2);
         }
-        
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 32px;
-            letter-spacing: 2px;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        input {
+        h2 { font-size: 18px; margin-bottom: 25px; letter-spacing: 2px; }
+        input[type="password"] {
             width: 100%;
             padding: 12px;
-            background: #111;
-            border: 1px solid #333;
-            border-radius: 5px;
-            color: #f3ba2f;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-        
-        input:focus {
+            margin-bottom: 20px;
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 6px;
+            color: #00f2ff;
+            text-align: center;
             outline: none;
-            border-color: #f3ba2f;
-            box-shadow: 0 0 10px rgba(243, 186, 47, 0.3);
+            box-sizing: border-box;
         }
-        
+        input[type="password"]:focus { border-color: #00f2ff; }
         button {
             width: 100%;
             padding: 12px;
-            background: #f3ba2f;
+            background: #00f2ff;
             color: #000;
             border: none;
-            border-radius: 5px;
+            border-radius: 6px;
             font-weight: bold;
-            font-size: 14px;
             cursor: pointer;
+            transition: 0.3s;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.3s;
-            margin-top: 20px;
         }
-        
-        button:hover {
-            background: #ffcc00;
-            box-shadow: 0 0 20px rgba(243, 186, 47, 0.5);
-        }
-        
-        .error {
-            background: #330000;
-            border: 1px solid #ff4444;
-            color: #ff8888;
-            padding: 12px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            text-align: center;
-            font-size: 12px;
-        }
+        button:hover { background: #00b8c4; transform: scale(1.02); }
+        .error { color: #ff4d4d; font-size: 12px; margin-top: 15px; }
+        .footer-note { margin-top: 30px; font-size: 10px; color: #333; }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h1>OMNI v78</h1>
-        
-        {% if error %}
-        <div class="error">{{ error }}</div>
-        {% endif %}
-        
-        <form method="POST">
-            <div class="form-group">
-                <label for="username">Usuário</label>
-                <input type="text" id="username" name="username" required autofocus>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Senha</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            
-            <button type="submit">ENTRAR</button>
-        </form>
-    </div>
+
+<div class="login-container">
+    <h2>🛡️ AGENTE GUARDION</h2>
+    <form method="POST">
+        <input type="password" name="password" placeholder="CHAVE DE ACESSO" required autofocus>
+        <button type="submit">DESBLOQUEAR PAINEL</button>
+    </form>
+    
+    {% if error %}
+    <div class="error">>> {{ error }}</div>
+    {% endif %}
+
+    <div class="footer-note">SISTEMA AUTÔNOMO v2.0 | CRYPTO SHIELD</div>
+</div>
+
 </body>
 </html>

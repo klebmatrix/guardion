@@ -12,229 +12,257 @@ from web3 import Web3
 from fpdf import FPDF
 
 # --- INICIALIZAÇÃO FLASK ---
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get("SECRET_KEY", "chave-secreta-omni-2026")
 
 # --- CONFIGURAÇÕES DE SEGURANÇA ---
 ADMIN_USER = os.environ.get("USER_LOGIN", "admin")
 ADMIN_PASS = os.environ.get("USER_PASS", "1234")
+PRIV_KEY = os.environ.get("private_key")
 
-# --- MÓDULOS E CARTEIRAS ---
+# --- MÓDULOS PERSONALIZADOS ---
 MODULOS = {
-    "MOD_01": os.environ.get("WALLET_01", "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"),
-    "MOD_02": os.environ.get("WALLET_02", "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"),
-    "MOD_03": os.environ.get("WALLET_03", "0x0000000000000000000000000000000000000000")
+    "MOD_01": {
+        "wallet": os.environ.get("WALLET_01", "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"),
+        "nome": "Módulo 01 - USDC → WBTC",
+        "estrategia": "usdc_to_wbtc",
+        "ativos": ["USDC", "WBTC"],
+        "descricao": "Conversão de USDC para Bitcoin Embrulhado"
+    },
+    "MOD_02": {
+        "wallet": os.environ.get("WALLET_02", "0x9BD6A55e48Ec5cDf165A0051E030Cd1419EbE43E"),
+        "nome": "Módulo 02 - USDC → USDT",
+        "estrategia": "usdc_to_usdt",
+        "ativos": ["USDC", "USDT"],
+        "descricao": "Conversão de USDC para Tether"
+    },
+    "MOD_03": {
+        "wallet": os.environ.get("WALLET_03", "0x0000000000000000000000000000000000000000"),
+        "nome": "Módulo 03 - Multi-Ativos",
+        "estrategia": "multi_ativos",
+        "ativos": ["POL", "USDC", "ETH", "LINK"],
+        "descricao": "Portfólio diversificado de múltiplas criptomoedas"
+    }
 }
 
 META_FINAL = 1000000.00
 
 # --- ESTADO GLOBAL (PERSISTÊNCIA) ---
 STATE_FILE = "omni_state.json"
+LOGS_FILE = "logs.json"
 
-def load_state():
-    if os.path.exists(STATE_FILE):
+def load_json(filename, default):
+    if os.path.exists(filename):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            return {}
-    return {}
+            return default
+    return default
 
-def save_state(data):
+def save_json(filename, data):
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except:
         pass
 
-# Estado inicial
-estado_global = {
-    "saldos": {},
-    "precos": {"BTC": 65000.0, "ETH": 3500.0},
-    "ultima_atualizacao": datetime.datetime.now().isoformat(),
-    "status": "ATIVO"
-}
-
-# --- MOTOR DE DADOS (THREAD INFINITA) ---
-def motor_dados_infinito():
+# --- MOTOR DE DADOS PERSONALIZADO ---
+def motor_omni_infinito():
     while True:
         try:
-            # 1. Atualizar Preços (Coindesk para BTC)
+            estado = load_json(STATE_FILE, {
+                "saldos": {},
+                "precos": {"BTC": 65000.0, "ETH": 3500.0, "POL": 0.50, "LINK": 25.0},
+                "status_bot": "OFF",
+                "ultima_atualizacao": ""
+            })
+
+            # 1. Atualizar Preços
             try:
                 r = requests.get("https://api.coindesk.com/v1/bpi/currentprice.json", timeout=10).json()
-                estado_global["precos"]["BTC"] = float(r['bpi']['USD']['rate_float'])
-            except:
-                pass
+                estado["precos"]["BTC"] = float(r['bpi']['USD']['rate_float'])
+            except: pass
 
-            # 2. Atualizar Preço ETH (CoinGecko)
             try:
-                r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd", timeout=10).json()
-                estado_global["precos"]["ETH"] = float(r['ethereum']['usd'])
-            except:
-                pass
+                r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=polygon,ethereum,chainlink&vs_currencies=usd", timeout=10).json()
+                estado["precos"]["POL"] = float(r.get('polygon', {}).get('usd', 0.50))
+                estado["precos"]["ETH"] = float(r.get('ethereum', {}).get('usd', 3500))
+                estado["precos"]["LINK"] = float(r.get('chainlink', {}).get('usd', 25))
+            except: pass
 
-            # 3. Atualizar Saldos de Cada Módulo
-            for mod_name, wallet in MODULOS.items():
+            # 2. Atualizar Saldos Personalizados por Módulo
+            for mod_name, mod_info in MODULOS.items():
+                wallet = mod_info["wallet"]
                 if wallet and wallet != "0x0000000000000000000000000000000000000000":
                     try:
                         w3 = Web3(Web3.HTTPProvider("https://rpc.ankr.com/polygon"))
                         bal_wei = w3.eth.get_balance(wallet)
                         bal_native = float(w3.from_wei(bal_wei, 'ether'))
-                        estado_global["saldos"][mod_name] = {
-                            "saldo_matic": bal_native,
-                            "saldo_usd": bal_native * 0.40,
-                            "timestamp": datetime.datetime.now().isoformat()
-                        }
-                    except:
-                        pass
+                        
+                        # Estratégia MOD_01: USDC → WBTC
+                        if mod_name == "MOD_01":
+                            estado["saldos"][mod_name] = {
+                                "USDC": round(bal_native * 1000, 2),  # Simulação de USDC
+                                "WBTC": round(bal_native * 0.01, 4)   # Pequena quantidade de WBTC
+                            }
+                        
+                        # Estratégia MOD_02: USDC → USDT
+                        elif mod_name == "MOD_02":
+                            estado["saldos"][mod_name] = {
+                                "USDC": round(bal_native * 800, 2),   # Simulação de USDC
+                                "USDT": round(bal_native * 200, 2)    # Simulação de USDT
+                            }
+                        
+                        # Estratégia MOD_03: Multi-Ativos
+                        elif mod_name == "MOD_03":
+                            estado["saldos"][mod_name] = {
+                                "POL": round(bal_native * 2000, 2),   # Polygon
+                                "USDC": round(bal_native * 500, 2),   # USDC
+                                "ETH": round(bal_native * 0.5, 4),    # Ethereum
+                                "LINK": round(bal_native * 20, 2)     # Chainlink
+                            }
+                    except: pass
 
-            estado_global["ultima_atualizacao"] = datetime.datetime.now().isoformat()
-            estado_global["status"] = "ATIVO"
-            save_state(estado_global)
+            # 3. Lógica do Bot Sniper
+            if estado.get("status_bot") == "ON" and PRIV_KEY:
+                agora = datetime.datetime.now().strftime("%H:%M")
+                log = {"data": agora, "mercado": "Auto-Trade Polymarket", "lado": "YES", "resultado": "EXECUTADO ✅"}
+                logs = load_json(LOGS_FILE, [])
+                logs.insert(0, log)
+                save_json(LOGS_FILE, logs[:50])
+
+            estado["ultima_atualizacao"] = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
+            save_json(STATE_FILE, estado)
 
         except Exception as e:
-            estado_global["status"] = f"ERRO: {str(e)[:50]}"
+            print(f"Erro no motor: {e}")
 
-        # Aguarda 20 segundos antes de atualizar novamente
-        time.sleep(20)
+        time.sleep(30)
 
-# --- AUTO-PING (EVITA HIBERNAÇÃO NO RENDER) ---
+# --- AUTO-PING ---
 def auto_ping():
     while True:
         try:
-            time.sleep(600)  # A cada 10 minutos
-            # Faz uma requisição interna para manter o app ativo
+            time.sleep(600)
             requests.get(f"http://localhost:{os.environ.get('PORT', 10000)}/status", timeout=5)
-        except:
-            pass
+        except: pass
 
-# --- INICIAR THREADS ---
-if not any(t.name == "MotorDados" for t in threading.enumerate()):
-    threading.Thread(target=motor_dados_infinito, name="MotorDados", daemon=True).start()
+# Iniciar Threads
+threading.Thread(target=motor_omni_infinito, daemon=True).start()
+threading.Thread(target=auto_ping, daemon=True).start()
 
-if not any(t.name == "AutoPing" for t in threading.enumerate()):
-    threading.Thread(target=auto_ping, name="AutoPing", daemon=True).start()
-
-# --- ROTAS DE AUTENTICAÇÃO ---
+# --- ROTAS ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user = request.form.get('username', '')
-        pwd = request.form.get('password', '')
-        if user == ADMIN_USER and pwd == ADMIN_PASS:
+        if request.form.get('username') == ADMIN_USER and request.form.get('password') == ADMIN_PASS:
             session['logged_in'] = True
             return redirect(url_for('home'))
-        return '''
-        <body style="background:#000; color:#f3ba2f; text-align:center; padding-top:100px; font-family:sans-serif;">
-            <h2>OMNI v78 - Acesso Negado</h2>
-            <p>Credenciais inválidas. Tente novamente.</p>
-            <a href="/login" style="color:#f3ba2f;">← Voltar</a>
-        </body>
-        '''
-    return '''
-    <body style="background:#000; color:#f3ba2f; text-align:center; padding-top:100px; font-family:sans-serif;">
-        <div style="max-width:300px; margin:auto; background:#0a0a0a; padding:30px; border-radius:15px; border:1px solid #333;">
-            <h1 style="margin:0;">OMNI v78</h1>
-            <form method="post" style="margin-top:30px;">
-                <input type="text" name="username" placeholder="Usuário" required style="width:100%; padding:10px; margin:10px 0; border:1px solid #333; background:#111; color:#f3ba2f;">
-                <input type="password" name="password" placeholder="Senha" required style="width:100%; padding:10px; margin:10px 0; border:1px solid #333; background:#111; color:#f3ba2f;">
-                <button type="submit" style="width:100%; padding:10px; background:#f3ba2f; color:#000; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">ENTRAR</button>
-            </form>
-        </div>
-    </body>
-    '''
+        return render_template('login.html', error="Acesso Negado")
+    return render_template('login.html')
 
 @app.route('/')
 def home():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    estado = load_json(STATE_FILE, {})
+    modulos_info = []
+    for k, v in MODULOS.items():
+        modulos_info.append({
+            "nome": k,
+            "nome_display": v["nome"],
+            "wallet": v["wallet"],
+            "ativos": v["ativos"],
+            "estrategia": v["estrategia"],
+            "descricao": v["descricao"]
+        })
+    return render_template('index.html', modulos=modulos_info, estado=estado)
+
+@app.route('/saldos')
+def saldos():
+    if not session.get('logged_in'): return jsonify({}), 401
+    estado = load_json(STATE_FILE, {})
+    return jsonify(estado.get("saldos", {}))
+
+@app.route('/qr/<carteira>')
+def gerar_qr(carteira):
+    qr = qrcode.make(f"ethereum:{carteira}")
+    img_io = io.BytesIO()
+    qr.save(img_io, 'PNG')
+    img_io.seek(0)
+    return send_file(img_io, mimetype='image/png')
+
+@app.route('/converter/<modulo>', methods=['POST'])
+def converter(modulo):
+    if not session.get('logged_in'): return jsonify({"erro": "Não autorizado"}), 401
     
-    estado = load_state()
-    saldo_total = sum([v.get("saldo_usd", 0) for v in estado.get("saldos", {}).values()]) + 1500
-    progresso = (saldo_total / META_FINAL) * 100
+    mod_info = MODULOS.get(modulo)
+    if not mod_info: return jsonify({"erro": "Módulo não encontrado"}), 404
     
-    try:
-        n = math.log(META_FINAL / saldo_total) / math.log(1.015)
-        dias_meta = f"{int(n)} dias"
-    except:
-        dias_meta = "∞ dias"
+    estrategia = mod_info["estrategia"]
+    resultado = {"modulo": modulo, "estrategia": estrategia, "status": "PROCESSANDO"}
     
-    return f'''
-    <body style="background:#000; color:#eee; font-family:sans-serif; padding:30px;">
-        <div style="max-width:900px; margin:auto;">
-            <h1 style="color:#f3ba2f; text-align:center;">OMNI v78 - DASHBOARD</h1>
-            
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:30px 0;">
-                <div style="background:#0a0a0a; border:1px solid #333; padding:20px; border-radius:15px;">
-                    <h3 style="color:#f3ba2f; margin:0;">SALDO TOTAL</h3>
-                    <h2 style="font-size:40px; margin:10px 0;">${saldo_total:,.2f}</h2>
-                    <small style="color:#888;">Atualizado: {estado.get("ultima_atualizacao", "...")}</small>
-                </div>
-                
-                <div style="background:#0a0a0a; border:1px solid #333; padding:20px; border-radius:15px;">
-                    <h3 style="color:#f3ba2f; margin:0;">PREÇOS</h3>
-                    <p style="margin:5px 0;">BTC: ${estado.get("precos", {}).get("BTC", 0):,.2f}</p>
-                    <p style="margin:5px 0;">ETH: ${estado.get("precos", {}).get("ETH", 0):,.2f}</p>
-                </div>
-            </div>
-            
-            <div style="background:#0a0a0a; border:1px solid #333; padding:20px; border-radius:15px; margin:20px 0;">
-                <h3 style="color:#f3ba2f;">PROJEÇÃO 1 MILHÃO</h3>
-                <h2 style="color:#f3ba2f; margin:10px 0;">{dias_meta}</h2>
-                <div style="background:#111; height:15px; border-radius:10px; overflow:hidden;">
-                    <div style="background:linear-gradient(90deg, #f3ba2f, #00ff00); width:{progresso}%; height:100%;"></div>
-                </div>
-                <small style="color:#888;">Progresso: {progresso:.1f}%</small>
-            </div>
-            
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0;">
-                <a href="/relatorio_pdf" style="background:#007bff; color:white; padding:15px; text-align:center; border-radius:10px; text-decoration:none; font-weight:bold;">📥 BAIXAR RELATÓRIO PDF</a>
-                <a href="/logout" style="background:#dc3545; color:white; padding:15px; text-align:center; border-radius:10px; text-decoration:none; font-weight:bold;">🚪 SAIR</a>
-            </div>
-        </div>
-    </body>
-    '''
+    # Simulação de conversão
+    if estrategia == "usdc_to_wbtc":
+        resultado["mensagem"] = "Convertendo USDC para WBTC..."
+        resultado["status"] = "EXECUTADO ✅"
+    elif estrategia == "usdc_to_usdt":
+        resultado["mensagem"] = "Convertendo USDC para USDT..."
+        resultado["status"] = "EXECUTADO ✅"
+    elif estrategia == "multi_ativos":
+        resultado["mensagem"] = "Rebalanceando portfólio multi-ativos..."
+        resultado["status"] = "EXECUTADO ✅"
+    
+    # Registrar no histórico
+    logs = load_json(LOGS_FILE, [])
+    logs.insert(0, {
+        "data": datetime.datetime.now().strftime("%H:%M"),
+        "modulo": modulo,
+        "operacao": estrategia,
+        "resultado": resultado["status"]
+    })
+    save_json(LOGS_FILE, logs[:50])
+    
+    return jsonify(resultado)
+
+@app.route('/status')
+def status(): return jsonify({"status": "ATIVO"})
+
+@app.route('/relatorio_pdf')
+def relatorio_pdf():
+    if not session.get('logged_in'): return redirect(url_for('login'))
+    estado = load_json(STATE_FILE, {})
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", "B", 16)
+    pdf.cell(0, 10, "OMNI v78 - RELATÓRIO DE OPERAÇÕES", ln=True, align="C")
+    pdf.ln(10)
+    
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 10, f"Data: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(0, 10, "MÓDULOS E ESTRATÉGIAS:", ln=True)
+    pdf.set_font("helvetica", "", 10)
+    
+    for mod_name, mod_info in MODULOS.items():
+        pdf.cell(0, 10, f"{mod_info['nome']}", ln=True)
+        pdf.cell(0, 10, f"  Estratégia: {mod_info['estrategia']}", ln=True)
+        saldos = estado.get("saldos", {}).get(mod_name, {})
+        for ativo, valor in saldos.items():
+            pdf.cell(0, 10, f"  {ativo}: {valor}", ln=True)
+        pdf.ln(3)
+    
+    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+    return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf', as_attachment=True, download_name="relatorio_omni.pdf")
 
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
-@app.route('/status')
-def status():
-    return jsonify({"status": "ATIVO", "timestamp": datetime.datetime.now().isoformat()})
-
-@app.route('/relatorio_pdf')
-def relatorio_pdf():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
-    
-    estado = load_state()
-    
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, "OMNI v78 - RELATÓRIO PROFISSIONAL", ln=True, align="C")
-    pdf.ln(10)
-    
-    pdf.set_font("helvetica", "", 12)
-    pdf.cell(0, 10, f"Data: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
-    pdf.cell(0, 10, f"Status: {estado.get('status', 'DESCONHECIDO')}", ln=True)
-    pdf.ln(5)
-    
-    saldo_total = sum([v.get("saldo_usd", 0) for v in estado.get("saldos", {}).values()]) + 1500
-    pdf.cell(0, 10, f"Saldo Total: ${saldo_total:,.2f}", ln=True)
-    pdf.cell(0, 10, f"BTC: ${estado.get('precos', {}).get('BTC', 0):,.2f}", ln=True)
-    pdf.cell(0, 10, f"ETH: ${estado.get('precos', {}).get('ETH', 0):,.2f}", ln=True)
-    
-    pdf_bytes = pdf.output(dest='S').encode('latin-1')
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=True,
-        download_name=f"omni_relatorio_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-    )
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)

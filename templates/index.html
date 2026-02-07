@@ -1,66 +1,45 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>GUARDION DASHBOARD | V2.2</title>
+    <title>GUARDION</title>
     <style>
-        body { background: #050505; color: #00f2ff; font-family: 'JetBrains Mono', monospace; padding: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 15px; }
-        .card { border: 1px solid #222; padding: 15px; border-radius: 12px; background: #0a0a0a; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        .card h3 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #1a1a1a; padding-bottom: 5px; color: #fff; }
-        .label { color: #555; font-size: 12px; }
-        .val { color: #00ff88; font-weight: bold; float: right; }
-        .token-row { margin-bottom: 5px; border-bottom: 1px dashed #111; padding-bottom: 2px; }
-        button { background: #00f2ff; color: #000; border: none; padding: 10px; cursor: pointer; width: 100%; font-weight: bold; border-radius: 6px; margin-top: 10px; transition: 0.3s; }
-        .btn-copy { background: transparent; color: #00f2ff; border: 1px solid #00f2ff; padding: 2px 6px; font-size: 10px; width: auto; margin: 0 0 0 10px; display: inline-block; }
-        .btn-copy:hover { background: #00f2ff; color: #000; }
-        table { width: 100%; margin-top: 30px; border-collapse: collapse; font-size: 12px; }
-        th { text-align: left; color: #555; padding: 10px; border-bottom: 1px solid #222; }
-        td { padding: 10px; border-bottom: 1px solid #111; color: #eee; }
-        .hash-cell { font-family: monospace; color: #444; display: flex; align-items: center; }
+        body { background: #000; color: #00f2ff; font-family: monospace; padding: 20px; }
+        .card { border: 1px solid #333; padding: 10px; margin: 10px 0; }
+        .val { color: #fff; }
+        button { background: #00f2ff; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        td, th { border: 1px solid #222; padding: 8px; text-align: left; }
     </style>
 </head>
 <body>
-    <h2 style="letter-spacing: 2px;">🛡️ PAINEL GUARDION ACTIVE</h2>
-    
-    <div class="grid">
+    <h2>🛡️ AGENTE GUARDION ACTIVE</h2>
+    <div id="cards">
         <div class="card">
-            <h3>MÓDULO 01 (ESTRUTURA WBTC)</h3>
-            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_01">0.00</span></div>
-            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_01">0.00</span></div>
-            <div class="token-row"><span class="label">WBTC:</span> <span class="val" id="wbtc-MOD_01">0.00</span></div>
-            <button onclick="swap('MOD_01')">SWAP USDC ➔ WBTC</button>
+            <h3>MOD 01 (WBTC)</h3>
+            POL: <span class="val" id="pol-MOD_01">...</span> | USDC: <span class="val" id="usdc-MOD_01">...</span><br>
+            WBTC: <span class="val" id="wbtc-MOD_01">...</span>
+            <button onclick="swap('MOD_01')">SWAP WBTC</button>
         </div>
-
         <div class="card">
-            <h3>MÓDULO 02 (ESTRUTURA USDT)</h3>
-            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_02">0.00</span></div>
-            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_02">0.00</span></div>
-            <div class="token-row"><span class="label">USDT:</span> <span class="val" id="usdt-MOD_02">0.00</span></div>
-            <button onclick="swap('MOD_02')">SWAP USDC ➔ USDT</button>
+            <h3>MOD 02 (USDT)</h3>
+            POL: <span class="val" id="pol-MOD_02">...</span> | USDC: <span class="val" id="usdc-MOD_02">...</span><br>
+            USDT: <span class="val" id="usdt-MOD_02">...</span>
+            <button onclick="swap('MOD_02')">SWAP USDT</button>
         </div>
-
         <div class="card">
-            <h3>MÓDULO 03 (DIVERSIFICAÇÃO)</h3>
-            <div class="token-row"><span class="label">POL:</span> <span class="val" id="pol-MOD_03">0.00</span></div>
-            <div class="token-row"><span class="label">USDC:</span> <span class="val" id="usdc-MOD_03">0.00</span></div>
-            <div class="token-row"><span class="label">MULTI-ATIVOS:</span> <span class="val">ATIVO</span></div>
-            <button onclick="swap('MOD_03')" style="background: #8b5cf6; color: #fff;">DIVERSIFICAR AGORA</button>
+            <h3>MOD 03 (MULTI)</h3>
+            POL: <span class="val" id="pol-MOD_03">...</span> | USDC: <span class="val" id="usdc-MOD_03">...</span>
+            <button onclick="swap('MOD_03')">DIVERSIFICAR</button>
         </div>
     </div>
 
-    <h3 style="margin-top: 40px; border-left: 4px solid #00f2ff; padding-left: 10px;">📜 LOG DE TRANSAÇÕES</h3>
+    <h3>📜 HISTÓRICO</h3>
     <table>
-        <thead><tr><th>HORA</th><th>MÓDULO</th><th>AÇÃO</th><th>HASH (BLOCKCHAIN)</th></tr></thead>
+        <thead><tr><th>HORA</th><th>MOD</th><th>AÇÃO</th><th>HASH</th></tr></thead>
         <tbody id="hist"></tbody>
     </table>
 
     <script>
-        function copiarHash(hash) {
-            navigator.clipboard.writeText(hash);
-            alert("Hash copiado!");
-        }
-
         async function load() {
             try {
                 const s = await (await fetch('/saldos')).json();
@@ -72,19 +51,11 @@
                 }
                 const h = await (await fetch('/historico')).json();
                 document.getElementById('hist').innerHTML = h.map(l => `
-                    <tr>
-                        <td>${l[1]}</td>
-                        <td><span style="color:#00f2ff">${l[2]}</span></td>
-                        <td>${l[3]}</td>
-                        <td class="hash-cell">
-                            ${l[4].slice(0,12)}... 
-                            <button class="btn-copy" onclick="copiarHash('${l[4]}')">COPIAR</button>
-                        </td>
-                    </tr>
+                    <tr><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td>
+                    <td>${l[4].slice(0,10)}... <button onclick="navigator.clipboard.writeText('${l[4]}')">C</button></td></tr>
                 `).join('');
             } catch(e) {}
         }
-
         async function swap(m) {
             await fetch('/converter', {
                 method: 'POST',
@@ -93,7 +64,6 @@
             });
             load();
         }
-
         setInterval(load, 5000);
         load();
     </script>

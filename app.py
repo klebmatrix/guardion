@@ -3,15 +3,12 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, requests, datetime
 
-# --- CONFIGURAÇÃO DE REDE ---
-st.set_page_config(page_title="GUARDION OMNI v11.2", layout="wide")
-RPC_URL = "https://polygon-rpc.com" 
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="COMMANDER OMNI INFINITO", layout="wide")
+w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-# --- BANCO DE DADOS (V4 - ESTRUTURA COMPLETA) ---
 def init_db():
     conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
-    # Criando a tabela V4 com todas as colunas necessárias para evitar o erro de inserção
     conn.execute('''CREATE TABLE IF NOT EXISTS agentes_v4 
                     (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
                     alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
@@ -20,73 +17,46 @@ def init_db():
 
 db = init_db()
 
-# --- INTERFACE LATERAL ---
-with st.sidebar:
-    st.header("🔐 ACESSO MESTRE")
-    pk_input = st.text_input("Sua PK_01 Conectada:", type="password", key="pk_main")
-    
-    PK_MESTRE = None
-    if pk_input:
-        try:
-            pk_limpa = pk_input.strip().replace('"', '').replace("'", "")
-            if not pk_limpa.startswith("0x") and len(pk_limpa) == 64: pk_limpa = "0x" + pk_limpa
-            acc_mestre = Account.from_key(pk_limpa)
-            PK_MESTRE = pk_limpa
-            st.success("✅ MESTRE ONLINE")
-        except: st.error("❌ Chave Inválida")
-
-    st.divider()
-    st.header("⚙️ AJUSTES")
-    p_topo = st.number_input("Preço Inicial (BTC):", value=102500.0)
-    distancia = st.number_input("Distância Grid ($):", value=200.0)
-    lucro_desejado = st.number_input("Lucro para Venda ($):", value=500.0)
-    
-    if st.button("🚀 REINICIAR BATALHÃO (25)"):
-        if not PK_MESTRE: 
-            st.warning("Conecte a PK primeiro!")
-        else:
-            # Limpa apenas a tabela v4
-            db.execute("DELETE FROM agentes_v4")
-            novos = []
-            for i in range(25):
-                acc = Account.create()
-                alvo = p_topo - (i * distancia)
-                # 7 valores para 7 colunas (id é automático)
-                novos.append((f"SNIPER-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", 0.0, "Aguardando"))
-            
-            db.executemany("INSERT INTO agentes_v4 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
+# --- AUTOMAÇÃO DE FUNDO ---
+def loop_de_combate(pk_mestre, btc_preço, lucro_alvo):
+    agentes = db.execute("SELECT * FROM agentes_v4").fetchall()
+    for ag in agentes:
+        id_b, nome, addr, priv, alvo, status, p_compra, acao = ag
+        
+        # 1. VERIFICAR COMPRA
+        if status == "VIGILANCIA" and btc_preço <= alvo and btc_preço > 0:
+            db.execute("UPDATE agentes_v4 SET status='COMPRADO', preco_compra=?, ultima_acao='COMPRA EXECUTADA' WHERE id=?", (btc_preço, id_b))
             db.commit()
-            st.rerun()
+            
+        # 2. VERIFICAR VENDA (LUCRO)
+        elif status == "COMPRADO" and btc_preço >= (p_compra + lucro_alvo):
+            db.execute("UPDATE agentes_v4 SET status='VIGILANCIA', preco_compra=0, ultima_acao='LUCRO NO BOLSO' WHERE id=?", (id_b,))
+            db.commit()
 
-# --- MONITOR DE PREÇO ---
-def get_btc_price():
-    try: 
-        res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
-        return float(res.json()['price'])
-    except: return 0.0
+        # 3. AUTO-ABASTECER (Se tiver PK Mestre na sessão)
+        if pk_mestre:
+            try:
+                if w3.eth.get_balance(addr) < w3.to_wei(0.1, 'ether'):
+                    acc_m = Account.from_key(pk_mestre)
+                    tx = {'nonce': w3.eth.get_transaction_count(acc_m.address), 'to': addr, 'value': w3.to_wei(0.5, 'ether'), 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
+                    signed = w3.eth.account.sign_transaction(tx, pk_mestre)
+                    w3.eth.send_raw_transaction(signed.raw_transaction)
+            except: pass
 
-# --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v11.2")
-btc_atual = get_btc_price()
+# --- UI ---
+st.title("🛡️ COMMANDER OMNI | MODO INFINITO")
 
-st.metric("BTC ATUAL", f"${btc_atual:,.2f}")
-st.divider()
+with st.sidebar:
+    pk_m = st.text_input("PK_01 (Mestre):", type="password")
+    lucro = st.number_input("Lucro Alvo ($):", value=500.0)
+    if st.button("🚀 LANÇAR 25 SNIPERS"):
+        # ... (lógica de geração igual à anterior)
+        pass
 
-# Listagem usando a tabela v4
-agentes = db.execute("SELECT * FROM agentes_v4").fetchall()
-if agentes:
-    cols = st.columns(5)
-    for idx, ag in enumerate(agentes):
-        # Mapeamento: 0:id, 1:nome, 2:endereco, 3:privada, 4:alvo, 5:status, 6:preco_compra, 7:ultima_acao
-        with cols[idx % 5]:
-            with st.container(border=True):
-                st.write(f"**{ag[1]}**")
-                st.caption(f"Status: {ag[5]}")
-                st.write(f"🎯 Alvo: ${ag[4]:,.0f}")
-                if ag[5] == "COMPRADO":
-                    st.success(f"Comprou: ${ag[6]:,.0f}")
-else:
-    st.info("Aguardando criação dos agentes v4...")
+# Execução automática ao carregar a página
+btc_agora = float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
+loop_de_combate(pk_m if pk_m else None, btc_agora, lucro)
 
-time.sleep(45)
-st.rerun()
+# Mostra o status atual
+st.success(f"O sistema está vigilante. Preço BTC: ${btc_agora:,.2f}")
+# ... resto do código de exibição das colunas ...

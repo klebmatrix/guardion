@@ -1,62 +1,71 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, requests, datetime
+import sqlite3, time, requests
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="COMMANDER OMNI INFINITO", layout="wide")
+# --- SISTEMA DE LOGIN SEGURO ---
+def login():
+    if "logado" not in st.session_state:
+        st.session_state.logado = False
+
+    if not st.session_state.logado:
+        st.title("🛡️ COMMANDER OMNI | ACESSO RESTRITO")
+        
+        # Tenta ler a senha dos Secrets, se não existir usa uma padrão
+        try:
+            senha_mestre = st.secrets["SECRET_KEY"]
+        except:
+            st.warning("⚠️ SECRET_KEY não configurada nos Secrets. Usando padrão: mestre123")
+            senha_mestre = "mestre123"
+
+        senha_input = st.text_input("Introduza a Chave do QG:", type="password")
+        
+        if st.button("AUTENTICAR"):
+            if senha_input == senha_mestre:
+                st.session_state.logado = True
+                st.success("Acesso concedido!")
+                st.rerun()
+            else:
+                st.error("Chave incorreta. Acesso negado.")
+        st.stop() # Interrompe o código aqui se não estiver logado
+
+login()
+
+# --- SEÇÃO OPERACIONAL (SÓ CARREGA APÓS LOGIN) ---
+st.set_page_config(page_title="COMMANDER OMNI", layout="wide")
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-def init_db():
-    conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
-    conn.execute('''CREATE TABLE IF NOT EXISTS agentes_v4 
-                    (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
-                    alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
-    conn.commit()
-    return conn
-
-db = init_db()
-
-# --- AUTOMAÇÃO DE FUNDO ---
-def loop_de_combate(pk_mestre, btc_preço, lucro_alvo):
-    agentes = db.execute("SELECT * FROM agentes_v4").fetchall()
-    for ag in agentes:
-        id_b, nome, addr, priv, alvo, status, p_compra, acao = ag
-        
-        # 1. VERIFICAR COMPRA
-        if status == "VIGILANCIA" and btc_preço <= alvo and btc_preço > 0:
-            db.execute("UPDATE agentes_v4 SET status='COMPRADO', preco_compra=?, ultima_acao='COMPRA EXECUTADA' WHERE id=?", (btc_preço, id_b))
-            db.commit()
-            
-        # 2. VERIFICAR VENDA (LUCRO)
-        elif status == "COMPRADO" and btc_preço >= (p_compra + lucro_alvo):
-            db.execute("UPDATE agentes_v4 SET status='VIGILANCIA', preco_compra=0, ultima_acao='LUCRO NO BOLSO' WHERE id=?", (id_b,))
-            db.commit()
-
-        # 3. AUTO-ABASTECER (Se tiver PK Mestre na sessão)
-        if pk_mestre:
-            try:
-                if w3.eth.get_balance(addr) < w3.to_wei(0.1, 'ether'):
-                    acc_m = Account.from_key(pk_mestre)
-                    tx = {'nonce': w3.eth.get_transaction_count(acc_m.address), 'to': addr, 'value': w3.to_wei(0.5, 'ether'), 'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137}
-                    signed = w3.eth.account.sign_transaction(tx, pk_mestre)
-                    w3.eth.send_raw_transaction(signed.raw_transaction)
-            except: pass
-
-# --- UI ---
-st.title("🛡️ COMMANDER OMNI | MODO INFINITO")
-
 with st.sidebar:
+    st.header("👤 COMANDANTE")
+    if st.button("LOGOUT / SAIR"):
+        st.session_state.logado = False
+        st.rerun()
+    st.divider()
+    # Aqui entra o campo da PK_01 que já configuramos
     pk_m = st.text_input("PK_01 (Mestre):", type="password")
-    lucro = st.number_input("Lucro Alvo ($):", value=500.0)
-    if st.button("🚀 LANÇAR 25 SNIPERS"):
-        # ... (lógica de geração igual à anterior)
-        pass
 
-# Execução automática ao carregar a página
-btc_agora = float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
-loop_de_combate(pk_m if pk_m else None, btc_agora, lucro)
+# --- BANCO E LÓGICA ---
+conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
+st.title("🛡️ PAINEL DE CONTROLO ATIVO")
 
-# Mostra o status atual
-st.success(f"O sistema está vigilante. Preço BTC: ${btc_agora:,.2f}")
-# ... resto do código de exibição das colunas ...
+# Exemplo de monitor de preço que já tínhamos
+try:
+    btc = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price']
+    st.metric("BTC/USDT", f"${float(btc):,.2f}")
+except:
+    st.write("A aguardar conexão com a Binance...")
+
+# Listagem dos 25 Agentes
+agentes = conn.execute("SELECT * FROM agentes_v4").fetchall()
+if agentes:
+    cols = st.columns(5)
+    for idx, ag in enumerate(agentes):
+        with cols[idx % 5]:
+            with st.container(border=True):
+                st.write(f"**{ag[1]}**")
+                st.caption(f"Status: {ag[5]}")
+else:
+    st.info("Batalhão pronto para ser gerado.")
+
+time.sleep(30)
+st.rerun()

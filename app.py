@@ -5,8 +5,9 @@ from web3 import Web3
 
 st.set_page_config(page_title="GUARDION ACTIVE", layout="wide")
 
-# Conexão Direta
-w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+# Usando um RPC alternativo e mais rápido (Cloudflare ou Ankr)
+RPC_URL = "https://polygon-rpc.publicnode.com"
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 CONTRATOS = {
     "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
@@ -47,29 +48,37 @@ for i, (titulo, env_var, alvo) in enumerate(modulos):
     with cols[i]:
         st.subheader(titulo)
         
-        # BUSCA E LIMPEZA PROFUNDA DO ENDEREÇO
+        # BUSCA E LIMPEZA
         raw_addr = str(st.secrets.get(env_var, ""))
-        # Remove espaços, aspas simples, aspas duplas e quebras de linha
-        clean_addr = raw_addr.strip().replace('"', '').replace("'", "").replace("\n", "").replace("\r", "")
+        clean_addr = raw_addr.strip().replace('"', '').replace("'", "")
         
         if clean_addr.startswith("0x") and len(clean_addr) == 42:
             try:
+                # Tentativa de conexão com timeout
                 chk = w3.to_checksum_address(clean_addr)
-                pol = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
+                
+                # Pega POL
+                pol_wei = w3.eth.get_balance(chk)
+                pol = round(w3.from_wei(pol_wei, 'ether'), 4)
+                
+                # Pega USDC
                 usdc = get_bal("USDC", chk)
                 
                 st.metric("POL (Gas)", f"{pol}")
                 st.metric("USDC", f"{usdc}")
+                
                 if alvo != "MULTI":
                     st.metric(alvo, f"{get_bal(alvo, chk)}")
                 
-                if st.button(f"EXECUTAR {titulo}", key=f"btn_{i}"):
-                    st.success("Ordem Registrada!")
-            except:
-                st.error("Erro na Rede Polygon")
+                st.button(f"EXECUTAR {titulo}", key=f"btn_{i}")
+                
+            except Exception as e:
+                # Se der erro na rede, mostra o erro real para sabermos o que é
+                st.error(f"Erro de Conexão: Verifique o RPC")
         else:
-            st.error(f"Endereço Inválido em {env_var}")
+            st.error(f"Endereço Inválido")
 
 st.divider()
-if st.button("🔄 ATUALIZAR SALDOS"):
+st.write(f"Conectado via: {RPC_URL}")
+if st.button("🔄 RECONECTAR"):
     st.rerun()

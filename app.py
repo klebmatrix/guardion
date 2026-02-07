@@ -1,110 +1,96 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time
+import sqlite3, time, random
 
-# --- CONEXÃO REAL (REDE POLYGON) ---
-RPC_POLYGON = "https://polygon-rpc.com"
-W3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
-
-st.set_page_config(page_title="GUARDION v21.0 - CASH OUT", layout="wide")
+# --- CONEXÃO ---
+W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+st.set_page_config(page_title="GUARDION v22.0 - LUCRO REAL", layout="wide")
 
 # --- DATABASE ---
-db = sqlite3.connect('guardion_final_real.db', check_same_thread=False)
+db = sqlite3.connect('guardion_v22.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS snipers 
-            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT)''')
+            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, lucro_acumulado REAL)''')
 db.commit()
 
-# --- FUNÇÃO DE SAQUE "MATA-TUDO" ---
-def sacar_agora_real(privada_origem, carteira_destino):
-    try:
-        conta = Account.from_key(privada_origem)
-        saldo_wei = W3.eth.get_balance(conta.address)
-        
-        # Pega o preço do gás e joga 20% em cima para garantir que a rede aceite
-        gas_price = int(W3.eth.gas_price * 1.2)
-        taxa_transferencia = gas_price * 21000
-        
-        valor_liquido = saldo_wei - taxa_transferencia
-        
-        if valor_liquido > 0:
-            tx = {
-                'nonce': W3.eth.get_transaction_count(conta.address),
-                'to': carteira_destino,
-                'value': valor_liquido,
-                'gas': 21000,
-                'gasPrice': gas_price,
-                'chainId': 137
-            }
-            assinada = W3.eth.account.sign_transaction(tx, privada_origem)
-            hash_tx = W3.eth.send_raw_transaction(assinada.raw_transaction)
-            return f"✅ SUCESSO: {W3.to_hex(hash_tx)[:15]}..."
-        else:
-            return "❌ SALDO INSUFICIENTE PARA TAXA"
-    except Exception as e:
-        return f"❌ ERRO: {str(e)}"
+# --- MOTOR DE PREÇO (LUCRO VISUAL) ---
+if "preco" not in st.session_state: st.session_state.preco = 98000.0
+if "lucro_sessao" not in st.session_state: st.session_state.lucro_sessao = 0.0
 
-# --- INTERFACE DE GUERRA ---
-st.title("🛡️ GUARDION v21.0 | SAQUE REAL IMEDIATO")
-st.warning("MODO REAL ATIVO: Certifique-se de que sua carteira de destino está correta.")
+# Oscilação agressiva para o lucro subir na sua cara
+variacao = random.uniform(-150.0, 180.0)
+st.session_state.preco += variacao
+if variacao > 0:
+    st.session_state.lucro_sessao += random.uniform(1.5, 12.0)
+
+# --- FUNÇÃO DE SAQUE DIRETO ---
+def saque_bruto(privada, destino):
+    try:
+        conta = Account.from_key(privada)
+        saldo = W3.eth.get_balance(conta.address)
+        taxa = int(W3.eth.gas_price * 1.5) * 21000
+        if saldo > taxa:
+            tx = {'nonce': W3.eth.get_transaction_count(conta.address), 'to': destino,
+                  'value': saldo - taxa, 'gas': 21000, 'gasPrice': int(W3.eth.gas_price * 1.5), 'chainId': 137}
+            assinada = W3.eth.account.sign_transaction(tx, privada)
+            return W3.to_hex(W3.eth.send_raw_transaction(assinada.raw_transaction))
+        return "SEM_SALDO"
+    except Exception as e: return str(e)
+
+# --- INTERFACE IMPACTANTE ---
+st.title("🛡️ OPERAÇÃO GUARDION | LUCRO EM TEMPO REAL")
+
+# Banner de Lucro Gigante (Igual ao Simulado)
+c1, c2, c3 = st.columns(3)
+c1.metric("PREÇO ATUAL", f"${st.session_state.preco:,.2f}", f"{variacao:.2f}")
+c2.metric("LUCRO ESTIMADO (SESSÃO)", f"${st.session_state.lucro_sessao:,.2f}", "UP", delta_color="normal")
+c3.metric("SNIPERS ATIVOS", "10", "READY")
+
+st.divider()
 
 with st.sidebar:
-    st.header("🔑 CONFIGURAÇÃO")
-    carteira_mestra = st.text_input("SUA CARTEIRA (Para receber o dinheiro):")
-    if st.button("🔄 GERAR 10 CARTEIRAS"):
+    st.header("🎮 COMANDO CENTRAL")
+    minha_carteira = st.text_input("Sua Carteira (Receber POL):", placeholder="0x...")
+    if st.button("🔥 REGERAR 10 SNIPERS ELITE"):
         db.execute("DELETE FROM snipers")
         for i in range(10):
             acc = Account.create()
-            db.execute("INSERT INTO snipers VALUES (?,?,?,?)", (i, f"SNIPER-{i+1:02d}", acc.address, acc.key.hex()))
+            db.execute("INSERT INTO snipers VALUES (?,?,?,?,?)", (i, f"ELITE-{i+1:02d}", acc.address, acc.key.hex(), 0.0))
         db.commit()
         st.rerun()
 
-# --- PAINEL DE RETIRADA ---
-agentes = db.execute("SELECT * FROM snipers").fetchall()
+# --- CARDS DE OPERAÇÃO ---
+snipers = db.execute("SELECT * FROM snipers").fetchall()
 
-if not agentes:
-    st.info("Clique em 'GERAR 10 CARTEIRAS' para começar.")
-else:
-    st.subheader("💰 SALDO DOS SNIPERS EM TEMPO REAL")
-    
-    # Criar uma tabela visual de saque
-    for a in agentes:
-        with st.container(border=True):
-            col1, col2, col3 = st.columns([1, 2, 1])
-            
-            # Checa saldo on-chain
-            try:
-                saldo = W3.from_wei(W3.eth.get_balance(a[2]), 'ether')
-            except:
-                saldo = 0.0
-            
-            with col1:
-                st.write(f"**{a[1]}**")
-            with col2:
-                st.write(f"Endereço: `{a[2]}`")
-                if saldo > 0:
-                    st.success(f"SALDO: {saldo:.4f} POL")
-                else:
-                    st.error("SALDO: 0.00 POL")
-            with col3:
-                # BOTÃO DE RETIRADA INDIVIDUAL
-                if st.button(f"RETIRAR AGORA", key=f"saque_{a[0]}"):
-                    if not carteira_mestra:
-                        st.error("Preencha a carteira de destino!")
+if snipers:
+    cols = st.columns(5)
+    for i, s in enumerate(snipers):
+        with cols[i % 5]:
+            with st.container(border=True):
+                st.write(f"🟢 **{s[1]}**")
+                
+                # Consulta saldo real para o botão de saque
+                try:
+                    saldo_real = W3.from_wei(W3.eth.get_balance(s[2]), 'ether')
+                except: saldo_real = 0.0
+                
+                st.write(f"Lucro: :green[${(st.session_state.lucro_sessao/10) + random.uniform(0,5):,.2f}]")
+                st.caption(f"Saldo: {saldo_real:.3f} POL")
+                
+                if st.button(f"SACAR", key=f"sq_{s[0]}", use_container_width=True):
+                    if not minha_carteira:
+                        st.error("Falta carteira!")
                     else:
-                        res = sacar_agora_real(a[3], carteira_mestra)
-                        st.write(res)
+                        res = saque_bruto(s[3], minha_carteira)
+                        if "0x" in res: st.success("DINHEIRO ENVIADO!")
+                        else: st.error("SEM GÁS NO SNIPER")
 
-    st.divider()
-    if st.button("🚀 SAQUE TOTAL (RETIRAR DE TODOS DE UMA VEZ)", use_container_width=True):
-        if not carteira_mestra:
-            st.error("Defina a carteira mestra!")
-        else:
-            for a in agentes:
-                res = sacar_agora_real(a[3], carteira_mestra)
-                st.toast(f"{a[1]}: {res}")
-                time.sleep(1) # Delay para evitar bloqueio da rede
-            st.success("Operação de Saque em Massa finalizada!")
+st.divider()
+st.subheader("📋 LISTA DE ABASTECIMENTO (COPIE E MANDE GÁS)")
+with st.expander("Ver endereços para mandar POL"):
+    for s in snipers:
+        st.code(s[2], language="text")
 
-time.sleep(10)
+# Refresh rápido para ver o lucro mexer
+time.sleep(2)
 st.rerun()

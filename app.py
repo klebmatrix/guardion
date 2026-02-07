@@ -4,15 +4,15 @@ from eth_account import Account
 import sqlite3, time, requests, datetime
 
 # --- CONFIGURAÇÃO DE REDE ---
-st.set_page_config(page_title="GUARDION OMNI v11.1", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v11.2", layout="wide")
 RPC_URL = "https://polygon-rpc.com" 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# --- BANCO DE DADOS (V3 - ESTÁVEL) ---
+# --- BANCO DE DADOS (V4 - ESTRUTURA COMPLETA) ---
 def init_db():
-    conn = sqlite3.connect('guardion_v3.db', check_same_thread=False)
-    # Tabela expandida para incluir lucro e preço de compra
-    conn.execute('''CREATE TABLE IF NOT EXISTS agentes 
+    conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
+    # Criando a tabela V4 com todas as colunas necessárias para evitar o erro de inserção
+    conn.execute('''CREATE TABLE IF NOT EXISTS agentes_v4 
                     (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
                     alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
     conn.commit()
@@ -32,95 +32,61 @@ with st.sidebar:
             if not pk_limpa.startswith("0x") and len(pk_limpa) == 64: pk_limpa = "0x" + pk_limpa
             acc_mestre = Account.from_key(pk_limpa)
             PK_MESTRE = pk_limpa
-            st.success(f"✅ MESTRE ONLINE")
+            st.success("✅ MESTRE ONLINE")
         except: st.error("❌ Chave Inválida")
 
     st.divider()
-    st.header("⚙️ AJUSTES DE COMBATE")
+    st.header("⚙️ AJUSTES")
     p_topo = st.number_input("Preço Inicial (BTC):", value=102500.0)
     distancia = st.number_input("Distância Grid ($):", value=200.0)
     lucro_desejado = st.number_input("Lucro para Venda ($):", value=500.0)
     
     if st.button("🚀 REINICIAR BATALHÃO (25)"):
-        if not PK_MESTRE: st.warning("Conecte a PK!")
+        if not PK_MESTRE: 
+            st.warning("Conecte a PK primeiro!")
         else:
-            db.execute("DELETE FROM agentes")
+            # Limpa apenas a tabela v4
+            db.execute("DELETE FROM agentes_v4")
             novos = []
             for i in range(25):
                 acc = Account.create()
                 alvo = p_topo - (i * distancia)
+                # 7 valores para 7 colunas (id é automático)
                 novos.append((f"SNIPER-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", 0.0, "Aguardando"))
-            db.executemany("INSERT INTO agentes (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
+            
+            db.executemany("INSERT INTO agentes_v4 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
             db.commit()
             st.rerun()
 
-# --- MOTOR DE EXECUÇÃO ---
+# --- MONITOR DE PREÇO ---
 def get_btc_price():
-    try: return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
+    try: 
+        res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+        return float(res.json()['price'])
     except: return 0.0
 
-def abastecer_agente(addr_agente):
-    if not PK_MESTRE: return
-    try:
-        saldo_wei = w3.eth.get_balance(addr_agente)
-        if saldo_wei < w3.to_wei(0.1, 'ether'):
-            acc_m = Account.from_key(PK_MESTRE)
-            tx = {
-                'nonce': w3.eth.get_transaction_count(acc_m.address),
-                'to': addr_agente, 'value': w3.to_wei(0.5, 'ether'),
-                'gas': 21000, 'gasPrice': w3.eth.gas_price, 'chainId': 137
-            }
-            signed = w3.eth.account.sign_transaction(tx, PK_MESTRE)
-            w3.eth.send_raw_transaction(signed.raw_transaction)
-            st.toast(f"⛽ Gas enviado para {addr_agente[:6]}")
-    except: pass
-
 # --- UI PRINCIPAL ---
-st.title("🛡️ COMMANDER OMNI v11.1")
+st.title("🛡️ COMMANDER OMNI v11.2")
 btc_atual = get_btc_price()
 
-c1, c2, c3 = st.columns(3)
-c1.metric("BTC ATUAL", f"${btc_atual:,.2f}")
-c2.metric("LUCRO ALVO", f"+ ${lucro_desejado}")
-c3.metric("STATUS", "OPERACIONAL" if btc_atual > 0 else "OFFLINE")
-
+st.metric("BTC ATUAL", f"${btc_atual:,.2f}")
 st.divider()
 
-agentes = db.execute("SELECT * FROM agentes").fetchall()
+# Listagem usando a tabela v4
+agentes = db.execute("SELECT * FROM agentes_v4").fetchall()
 if agentes:
     cols = st.columns(5)
     for idx, ag in enumerate(agentes):
-        id_banco, nome, endereco, privada, alvo, status, p_compra, acao = ag
+        # Mapeamento: 0:id, 1:nome, 2:endereco, 3:privada, 4:alvo, 5:status, 6:preco_compra, 7:ultima_acao
         with cols[idx % 5]:
             with st.container(border=True):
-                time.sleep(0.02) # Anti-ban RPC
-                try: saldo = round(w3.from_wei(w3.eth.get_balance(endereco), 'ether'), 2)
-                except: saldo = 0.0
-                
-                # --- LÓGICA DE COMPRA/VENDA ---
-                cor_status = "white"
-                if status == "VIGILANCIA":
-                    if btc_atual <= alvo and btc_atual > 0:
-                        db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, ultima_acao='ORDEM COMPRA' WHERE id=?", (btc_atual, id_banco))
-                        db.commit()
-                        st.rerun()
-                elif status == "COMPRADO":
-                    cor_status = "#00FF00" # Verde para quando está posicionado
-                    if btc_atual >= (p_compra + lucro_desejado):
-                        db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0, ultima_acao='LUCRO REALIZADO' WHERE id=?", (id_banco,))
-                        db.commit()
-                        st.rerun()
-
-                st.markdown(f"<p style='color:{cor_status}; font-weight:bold;'>{nome}</p>", unsafe_allow_html=True)
-                st.write(f"⛽ {saldo} POL")
-                st.caption(f"🎯 Alvo: ${alvo:,.0f}")
-                if status == "COMPRADO":
-                    st.success(f"Compra: ${p_compra:,.0f}")
-                
-                if PK_MESTRE and saldo < 0.1:
-                    abastecer_agente(endereco)
+                st.write(f"**{ag[1]}**")
+                st.caption(f"Status: {ag[5]}")
+                st.write(f"🎯 Alvo: ${ag[4]:,.0f}")
+                if ag[5] == "COMPRADO":
+                    st.success(f"Comprou: ${ag[6]:,.0f}")
 else:
-    st.info("Aguardando ativação do batalhão.")
+    st.info("Aguardando criação dos agentes v4...")
 
 time.sleep(45)
 st.rerun()

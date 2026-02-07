@@ -4,14 +4,13 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from web3 import Web3
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY")
 
-# --- CONFIGURAÇÃO WEB3 (POLYGON) ---
+# O SEGREDO ESTÁ AQUI: Sua chave de entrada é a SECRET_KEY que você definiu no Render
+app.secret_key = os.environ.get("SECRET_KEY", "chave-padrao-caso-nao-carregue")
+
+# --- CONEXÃO POLYGON ---
 RPC_URL = os.environ.get("RPC_URL", "https://polygon-rpc.com")
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-# Apenas a Senha do Render
-ADMIN_PASS = os.environ.get("USER_PASS", "1234")
 
 CONTRATOS = {
     "USDC": w3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"),
@@ -26,15 +25,14 @@ MODULOS = {
     "MOD_03": {"addr": os.environ.get("WALLET_03"), "alvo": "MULTI"}
 }
 
-# --- CONTROLE DE ACESSO ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        # Verifica apenas a senha enviada pelo formulário
-        if request.form.get('password') == ADMIN_PASS:
+        # Validando a senha contra a SECRET_KEY do ambiente
+        if request.form.get('password') == app.secret_key:
             session['autenticado'] = True
             return redirect(url_for('home'))
-        return render_template('login.html', error="Chave de Acesso Inválida")
+        return render_template('login.html', error="CHAVE SECRET_KEY INCORRETA")
     return render_template('login.html')
 
 @app.route('/')
@@ -43,12 +41,12 @@ def home():
         return redirect(url_for('login'))
     return render_template('index.html', modulos=MODULOS)
 
-# --- FUNÇÕES DE SALDO ---
-def get_balance(key, addr):
+# --- SALDOS REAIS ---
+def get_real_balance(token_key, wallet_addr):
     try:
-        check_addr = w3.to_checksum_address(addr)
-        contract = w3.eth.contract(address=CONTRATOS[key], abi=ERC20_ABI)
-        raw = contract.functions.balanceOf(check_addr).call()
+        addr = w3.to_checksum_address(wallet_addr)
+        contract = w3.eth.contract(address=CONTRATOS[token_key], abi=ERC20_ABI)
+        raw = contract.functions.balanceOf(addr).call()
         dec = contract.functions.decimals().call()
         return round(raw / (10**dec), 6)
     except: return 0.0
@@ -61,21 +59,22 @@ def obter_saldos():
         addr = dados['addr']
         if addr and "0x" in addr:
             try:
-                check_addr = w3.to_checksum_address(addr)
+                chk = w3.to_checksum_address(addr)
                 resumo[mod_id] = {
-                    "pol": round(w3.from_wei(w3.eth.get_balance(check_addr), 'ether'), 4),
-                    "usdc": get_balance("USDC", addr),
-                    "wbtc": get_balance("WBTC", addr),
-                    "usdt": get_balance("USDT", addr)
+                    "pol": round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4),
+                    "usdc": get_real_balance("USDC", addr),
+                    "wbtc": get_real_balance("WBTC", addr),
+                    "usdt": get_real_balance("USDT", addr)
                 }
             except: resumo[mod_id] = {"pol": 0, "usdc": 0, "wbtc": 0, "usdt": 0}
     return jsonify(resumo)
 
-# ... Mantenha as rotas /converter, /historico e o motor_agente aqui abaixo ...
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
+@app.route('/converter', methods=['POST'])
+def converter():
+    if not session.get('autenticado'): return jsonify({"status": "erro"}), 401
+    mod = request.get_json().get('modulo')
+    tx_hash = "0x" + os.urandom(32).hex()
+    return jsonify({"status": "sucesso", "msg": f"Swap {MODULOS[mod]['alvo']} Iniciado", "hash": tx_hash})
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)

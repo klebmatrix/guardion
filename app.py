@@ -5,9 +5,9 @@ from web3 import Web3
 
 st.set_page_config(page_title="GUARDION ACTIVE", layout="wide")
 
-# Usando um RPC alternativo e mais rápido (Cloudflare ou Ankr)
-RPC_URL = "https://polygon-rpc.publicnode.com"
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+# RPC da Cloudflare (Geralmente não cai e não bloqueia)
+RPC_URL = "https://polygon-rpc.com" 
+w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={'timeout': 20}))
 
 CONTRATOS = {
     "USDC": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
@@ -36,6 +36,11 @@ if "auth" not in st.session_state:
         st.rerun()
     st.stop()
 
+# TESTE DE CONEXÃO INICIAL
+if not w3.is_connected():
+    st.error("🔴 Sem resposta da rede Polygon. Tentando trocar de servidor...")
+    w3 = Web3(Web3.HTTPProvider("https://polygon.llamarpc.com"))
+
 # MÓDULOS
 cols = st.columns(3)
 modulos = [
@@ -54,14 +59,10 @@ for i, (titulo, env_var, alvo) in enumerate(modulos):
         
         if clean_addr.startswith("0x") and len(clean_addr) == 42:
             try:
-                # Tentativa de conexão com timeout
                 chk = w3.to_checksum_address(clean_addr)
                 
-                # Pega POL
-                pol_wei = w3.eth.get_balance(chk)
-                pol = round(w3.from_wei(pol_wei, 'ether'), 4)
-                
-                # Pega USDC
+                # Pega POL e USDC
+                pol = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
                 usdc = get_bal("USDC", chk)
                 
                 st.metric("POL (Gas)", f"{pol}")
@@ -73,12 +74,11 @@ for i, (titulo, env_var, alvo) in enumerate(modulos):
                 st.button(f"EXECUTAR {titulo}", key=f"btn_{i}")
                 
             except Exception as e:
-                # Se der erro na rede, mostra o erro real para sabermos o que é
-                st.error(f"Erro de Conexão: Verifique o RPC")
+                st.error(f"Erro ao ler saldo. Tente atualizar.")
         else:
-            st.error(f"Endereço Inválido")
+            st.warning(f"Aguardando {env_var}")
 
 st.divider()
-st.write(f"Conectado via: {RPC_URL}")
-if st.button("🔄 RECONECTAR"):
+st.info(f"Conexão ativa: {w3.is_connected()}")
+if st.button("🔄 FORÇAR RECONEXÃO"):
     st.rerun()

@@ -4,10 +4,8 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from web3 import Web3
 
 app = Flask(__name__)
-# Chave de entrada vinda do Render
 app.secret_key = str(os.environ.get("SECRET_KEY", "123")).strip()
 
-# RPC Estável para garantir conexão
 RPC_URL = "https://polygon-rpc.com"
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
@@ -18,7 +16,6 @@ CONTRATOS = {
 }
 ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-# Funções de Banco e Saldo
 def init_db():
     conn = sqlite3.connect('historico.db')
     conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
@@ -29,9 +26,7 @@ init_db()
 
 @app.route('/health')
 def health():
-    # Rota para o painel saber se o Python está vivo e conectado à rede
-    connected = w3.is_connected()
-    return jsonify({"status": "ONLINE" if connected else "OFFLINE", "network": "Polygon"})
+    return jsonify({"status": "ONLINE" if w3.is_connected() else "OFFLINE"})
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -39,7 +34,6 @@ def login():
         if request.form.get('password') == app.secret_key:
             session['autenticado'] = True
             return redirect(url_for('home'))
-        return render_template('login.html', error="Senha Incorreta")
     return render_template('login.html')
 
 @app.route('/')
@@ -53,8 +47,8 @@ def saldos():
     res = {}
     wallets = {
         "MOD_01": str(os.environ.get("WALLET_01", "")).strip(),
-        "MOD_02": str(os.environ.get("WALLET_02", "").strip(),
-        "MOD_03": str(os.environ.get("WALLET_03", "").strip()
+        "MOD_02": str(os.environ.get("WALLET_02", "")).strip(),
+        "MOD_03": str(os.environ.get("WALLET_03", "")).strip()
     }
     for m, addr in wallets.items():
         if len(addr) < 40:
@@ -81,7 +75,7 @@ def get_bal(tk, addr):
 @app.route('/historico')
 def historico():
     conn = sqlite3.connect('historico.db')
-    rows = conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 10").fetchall()
+    rows = conn.execute("SELECT * VALUES FROM logs ORDER BY id DESC LIMIT 10").fetchall()
     conn.close()
     return jsonify(rows or [])
 
@@ -90,8 +84,7 @@ def converter():
     m = request.get_json().get('modulo')
     tx = "0x" + os.urandom(20).hex()
     with sqlite3.connect('historico.db') as conn:
-        conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
-                     (datetime.now().strftime("%H:%M:%S"), m, "SWAP EXECUTADO", tx))
+        conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", (datetime.now().strftime("%H:%M:%S"), m, "SWAP", tx))
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":

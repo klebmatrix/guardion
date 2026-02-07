@@ -4,10 +4,10 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from web3 import Web3
 
 app = Flask(__name__)
-# Usa a sua SECRET_KEY do Render como senha de entrada
-app.secret_key = os.environ.get("SECRET_KEY", "chave-padrao").strip()
+# Garante que a chave do Render seja lida sem espaços
+app.secret_key = str(os.environ.get("SECRET_KEY", "chave-padrao")).strip()
 
-# Conexão Blockchain
+# RPC estável da Polygon
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
 CONTRATOS = {
@@ -17,26 +17,22 @@ CONTRATOS = {
 }
 ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-WALLETS = {
-    "MOD_01": os.environ.get("WALLET_01", "").strip(),
-    "MOD_02": os.environ.get("WALLET_02", "").strip(),
-    "MOD_03": os.environ.get("WALLET_03", "").strip()
-}
+# Puxa carteiras do Render com limpeza de texto
+def get_wallet(name):
+    return str(os.environ.get(name, "")).strip()
 
-# --- BANCO DE DATOS ---
+# --- BANCO DE DADOS (Criação Forçada) ---
 def init_db():
-    conn = sqlite3.connect('historico.db')
-    conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
-    conn.close()
-
-def add_log(mod, acao, tx_hash):
-    with sqlite3.connect('historico.db') as conn:
-        data = datetime.now().strftime("%d/%m %H:%M")
-        conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", (data, mod, acao, tx_hash))
+    try:
+        conn = sqlite3.connect('historico.db')
+        conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro DB: {e}")
 
 init_db()
 
-# --- ROTAS ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -52,36 +48,55 @@ def home():
 
 @app.route('/saldos')
 def saldos():
+    if not session.get('ok'): return jsonify({})
     res = {}
-    for m, addr in WALLETS.items():
-        if not addr: continue
+    wallets = {"MOD_01": get_wallet("WALLET_01"), "MOD_02": get_wallet("WALLET_02"), "MOD_03": get_wallet("WALLET_03")}
+    
+    for m, addr in wallets.items():
+        if len(addr) < 40: # Carteira inválida ou vazia
+            res[m] = {"pol":"0.0", "usdc":"0.0", "wbtc":"0.0", "usdt":"0.0"}
+            continue
         try:
             chk = w3.to_checksum_address(addr)
+            bal_pol = w3.eth.get_balance(chk)
             res[m] = {
-                "pol": str(round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)),
+                "pol": str(round(w3.from_wei(bal_pol, 'ether'), 4)),
                 "usdc": str(get_bal("USDC", chk)),
                 "wbtc": str(get_bal("WBTC", chk)),
                 "usdt": str(get_bal("USDT", chk))
             }
-        except: res[m] = {"pol":"0","usdc":"0","wbtc":"0","usdt":"0"}
+        except:
+            res[m] = {"pol":"0.0", "usdc":"0.0", "wbtc":"0.0", "usdt":"0.0"}
     return jsonify(res)
 
 def get_bal(tk, addr):
     try:
         c = w3.eth.contract(address=w3.to_checksum_address(CONTRATOS[tk]), abi=ABI)
-        return round(c.functions.balanceOf(addr).call() / (10**c.functions.decimals().call()), 4)
-    except: return 0
+        raw = c.functions.balanceOf(addr).call()
+        dec = c.functions.decimals().call()
+        return round(raw / (10**dec), 4)
+    except: return 0.0
 
 @app.route('/historico')
 def historico():
-    with sqlite3.connect('historico.db') as conn:
-        return jsonify(conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 10").fetchall())
+    try:
+        conn = sqlite3.connect('historico.db')
+        rows = conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 10").fetchall()
+        conn.close()
+        return jsonify(rows)
+    except: return jsonify([])
 
 @app.route('/converter', methods=['POST'])
 def converter():
+    if not session.get('ok'): return jsonify({"status": "erro"}), 401
     m = request.get_json().get('modulo')
     h = "0x" + os.urandom(20).hex()
-    add_log(m, "SWAP EXECUTADO", h)
+    
+    # Grava no banco
+    with sqlite3.connect('historico.db') as conn:
+        data = datetime.now().strftime("%d/%m %H:%M")
+        conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", (data, m, "SWAP EXECUTADO", h))
+    
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":

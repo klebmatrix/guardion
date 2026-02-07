@@ -2,19 +2,25 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sniper Login</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Login | OMNI AGENT</title>
+    <style>
+        body { background: #020617; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login-card { background: #0f172a; padding: 40px; border-radius: 20px; border: 1px solid #1e293b; width: 320px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h1 { color: #3b82f6; margin-bottom: 30px; font-size: 24px; }
+        input { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #3b82f6; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background: #2563eb; }
+        .error { color: #ef4444; font-size: 13px; margin-bottom: 15px; }
+    </style>
 </head>
-<body class="bg-black text-green-500 h-screen flex items-center justify-center font-mono">
-    <div class="bg-gray-900 p-8 rounded-lg border border-green-900 shadow-2xl w-80">
-        <h2 class="text-2xl mb-6 text-center font-bold tracking-widest underline">ACESSO RESTRITO</h2>
-        <form action="/entrar" method="post" class="space-y-4">
-            <input type="password" name="pin" placeholder="DIGITE O PIN" 
-                class="w-full bg-black border border-green-800 p-3 rounded text-center focus:outline-none focus:border-green-400">
-            <button type="submit" class="w-full bg-green-900 hover:bg-green-700 text-black font-bold py-3 rounded transition-all">
-                AUTENTICAR
-            </button>
+<body>
+    <div class="login-card">
+        <h1>OMNI AGENT</h1>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="POST">
+            <input type="text" name="username" placeholder="Usuário" required>
+            <input type="password" name="password" placeholder="Senha" required>
+            <button type="submit">ENTRAR NO SISTEMA</button>
         </form>
     </div>
 </body>

@@ -1,42 +1,55 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Agente Estratégico Multi</title>
+    <title>Painel de Conversão WBTC</title>
     <style>
-        body { background: #020617; color: #f8fafc; font-family: sans-serif; text-align: center; }
-        .market-bar { background: #1e293b; padding: 10px; border-bottom: 2px solid #3b82f6; font-weight: bold; }
-        .grid { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-top: 30px; }
-        .card { background: #1e293b; border: 1px solid #3b82f6; padding: 20px; border-radius: 12px; width: 260px; }
-        .qr-box { background: white; padding: 10px; display: inline-block; border-radius: 8px; margin: 15px 0; }
-        .status-on { color: #10b981; animation: blink 2s infinite; }
-        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.5;} 100% {opacity: 1;} }
+        body { background: #0a0e17; color: white; font-family: sans-serif; text-align: center; }
+        .grid { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 20px; }
+        .card { background: #161e2d; border: 2px solid #3b82f6; padding: 20px; border-radius: 15px; width: 280px; }
+        .btn-converter { 
+            background: #f7931a; color: white; border: none; padding: 12px; 
+            width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 15px;
+        }
+        .btn-converter:hover { background: #e88310; }
+        .status-msg { font-size: 12px; color: #10b981; margin-top: 10px; height: 20px; }
     </style>
 </head>
 <body>
-    <div class="market-bar">BTC/USDC: <span id="btc-price">Carregando...</span></div>
-    <h1>AGENTE MULTI-ENTRADA</h1>
-    <p>O robô só executa a movimentação quando detecta saldo e condições favoráveis.</p>
+    <h1>CONVERSOR AGENTE MULTI (WBTC)</h1>
+    <p>Selecione o módulo para transformar saldo em WBTC</p>
 
     <div class="grid">
         {% for nome, carteira in modulos.items() %}
         <div class="card">
-            <div class="status-on">● AGENTE {{ nome }} ONLINE</div>
-            <div class="qr-box">
-                <img src="/qr/{{ carteira }}" width="160">
-            </div>
-            <p><small>Deposite para Iniciar Entrada</small></p>
-            <p style="font-size: 9px;">{{ carteira }}</p>
+            <h2 style="color: #f7931a;">{{ nome }}</h2>
+            <img src="/qr/{{ carteira }}" width="180" style="background: white; padding: 5px; border-radius: 8px;">
+            <p><small>Destino WBTC: {{ carteira[:10] }}...</small></p>
+            
+            <button class="btn-converter" onclick="solicitarConversao('{{ nome }}')">
+                CONVERTER AGORA ➔ WBTC
+            </button>
+            <div id="status-{{ nome }}" class="status-msg"></div>
         </div>
         {% endfor %}
     </div>
 
     <script>
-        // Atualiza o preço na tela para você acompanhar
-        setInterval(async () => {
-            const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-            const data = await res.json();
-            document.getElementById('btc-price').innerText = '$' + parseFloat(data.price).toLocaleString();
-        }, 5000);
+        async function solicitarConversao(idModulo) {
+            const statusDiv = document.getElementById('status-' + idModulo);
+            statusDiv.innerText = "Processando com Agente...";
+            
+            try {
+                const response = await fetch('/converter', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({modulo: idModulo})
+                });
+                const result = await response.json();
+                statusDiv.innerText = result.msg;
+            } catch (err) {
+                statusDiv.innerText = "Erro na conexão com o Agente.";
+            }
+        }
     </script>
 </body>
 </html>

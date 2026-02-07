@@ -4,16 +4,15 @@ from eth_account import Account
 import sqlite3, time, requests, datetime
 
 # --- 1. SETUP ---
-st.set_page_config(page_title="GUARDION OMNI v14.2 REAL", layout="wide")
+st.set_page_config(page_title="GUARDION OMNI v14.3 REAL", layout="wide")
 
-# --- 2. BANCO DE DADOS (INÍCIO ANTECIPADO) ---
+# --- 2. BANCO DE DADOS ---
 db = sqlite3.connect('guardion_real_v14.db', check_same_thread=False)
 db.execute('''CREATE TABLE IF NOT EXISTS agentes 
                 (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
                 alvo REAL, status TEXT, preco_compra REAL, hash TEXT)''')
 db.commit()
 
-# Garante que a variável existe mesmo se o banco estiver vazio
 agentes = db.execute("SELECT * FROM agentes").fetchall()
 
 # --- 3. LOGIN ---
@@ -28,10 +27,9 @@ if not st.session_state.logado:
             st.rerun()
     st.stop()
 
-# --- 4. CONEXÃO RPC ---
+# --- 4. CONEXÃO RPC & FUNÇÕES BLOCKCHAIN ---
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-# --- 5. MOTOR DE PREÇO & FUNÇÕES REAIS ---
 def pegar_preco_btc():
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
@@ -62,8 +60,8 @@ def abastecer_agentes(pk_mestre):
         return True
     except: return False
 
-# --- 6. INTERFACE E LÓGICA ---
-st.title("🛡️ COMMANDER OMNI | v14.2")
+# --- 5. INTERFACE ---
+st.title("🛡️ COMMANDER OMNI | v14.3")
 btc = pegar_preco_btc()
 
 if btc:
@@ -77,7 +75,7 @@ if btc:
                 db.commit()
                 st.toast(f"✅ {nome} disparou na rede!")
 
-# --- 7. SIDEBAR ---
+# --- 6. SIDEBAR ---
 with st.sidebar:
     pk_m = st.text_input("PK_01 (Mestre):", type="password")
     if st.button("🚀 LANÇAR 50 SNIPERS"):
@@ -93,7 +91,7 @@ with st.sidebar:
         if abastecer_agentes(pk_m): st.success("Abastecidos!")
         else: st.error("Falha no envio")
 
-# --- 8. VISUALIZAÇÃO ---
+# --- 7. VISUALIZAÇÃO (CORRIGIDA PARA 2026) ---
 tab1, tab2 = st.tabs(["🎯 GRID", "📄 LOGS (SHS/HASH)"])
 with tab1:
     if agentes:
@@ -108,8 +106,8 @@ with tab2:
     if agentes:
         import pandas as pd
         df = pd.DataFrame(agentes, columns=['ID','Nome','Carteira','Privada','Alvo','Status','Preço','Hash'])
-        # Link para PolygonScan Real
         df['Ver no Scan'] = df['Hash'].apply(lambda x: f"https://polygonscan.com/tx/{x}" if x.startswith('0x') else x)
-        st.dataframe(df[['Nome', 'Status', 'Ver no Scan', 'Carteira']], use_container_width=True)
+        # CORREÇÃO AQUI: width='stretch' substitui use_container_width=True
+        st.dataframe(df[['Nome', 'Status', 'Ver no Scan', 'Carteira']], width='stretch')
 
 time.sleep(20); st.rerun()

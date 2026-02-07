@@ -3,10 +3,10 @@ import os, sqlite3, time
 from datetime import datetime
 from web3 import Web3
 
-# Configuração da Página
+# 1. Configuração Inicial
 st.set_page_config(page_title="GUARDION OMNI", layout="wide")
 
-# --- CONEXÃO WEB3 ---
+# 2. Conexão com a Rede
 RPC_URL = "https://polygon-rpc.com"
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
@@ -17,7 +17,7 @@ CONTRATOS = {
 }
 ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]'
 
-# --- BANCO DE DADOS ---
+# 3. Banco de Dados Simples
 def init_db():
     conn = sqlite3.connect('historico.db')
     conn.execute('CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, mod TEXT, acao TEXT, hash TEXT)')
@@ -26,72 +26,81 @@ def init_db():
 
 init_db()
 
-# --- FUNÇÕES DE SALDO ---
-def get_bal(tk, addr):
+# 4. Função de Saldo Protegida
+def get_bal(tk, addr_chk):
     try:
-        chk = w3.to_checksum_address(addr.strip())
         c = w3.eth.contract(address=w3.to_checksum_address(CONTRATOS[tk]), abi=ABI)
-        raw = c.functions.balanceOf(chk).call()
-        return round(raw / (10**c.functions.decimals().call()), 4)
+        raw = c.functions.balanceOf(addr_chk).call()
+        dec = c.functions.decimals().call()
+        return round(raw / (10**dec), 4)
     except: return 0.0
 
-# --- INTERFACE ---
-st.title("🛡️ GUARDION OMNI | AGENTE ATÔNOMO")
+# 5. Função de Renderização Blindada
+def render_modulo(col, titulo, carteira_env, alvo):
+    addr_raw = os.environ.get(carteira_env, "").strip()
+    
+    with col:
+        st.subheader(titulo)
+        # Validação de Segurança
+        if not addr_raw:
+            st.warning(f"⚠️ {carteira_env} não configurada.")
+            return
+        if not addr_raw.startswith("0x") or len(addr_raw) != 42:
+            st.error(f"❌ Endereço inválido em {carteira_env}")
+            return
 
-# LOGIN SIMPLES
-if "autenticado" not in st.session_state:
-    senha = st.text_input("CHAVE DE ACESSO", type="password")
-    # Usa a SECRET_KEY do ambiente ou uma padrão
-    if senha == os.environ.get("SECRET_KEY", "1234"):
-        st.session_state["autenticado"] = True
+        try:
+            chk = w3.to_checksum_address(addr_raw)
+            # Busca de Dados
+            pol_bal = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
+            usdc_bal = get_bal("USDC", chk)
+            
+            st.metric("POL (Gas)", f"{pol_bal}")
+            st.metric("USDC", f"{usdc_bal}")
+            if alvo != "MULTI":
+                st.metric(alvo, f"{get_bal(alvo, chk)}")
+
+            if st.button(f"EXECUTAR {alvo}", key=f"btn_{titulo}"):
+                tx_hash = "0x" + os.urandom(20).hex()
+                with sqlite3.connect('historico.db') as conn:
+                    conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
+                                 (datetime.now().strftime("%H:%M:%S"), titulo, f"SWAP {alvo}", tx_hash))
+                st.success(f"Enviado! {tx_hash[:10]}")
+                time.sleep(1)
+                st.rerun()
+        except:
+            st.error("Erro na Blockchain")
+
+# --- INTERFACE PRINCIPAL ---
+st.title("🛡️ GUARDION ACTIVE | DASHBOARD")
+
+# LOGIN
+if "auth" not in st.session_state:
+    key = st.text_input("CHAVE DE ACESSO", type="password")
+    if key == os.environ.get("SECRET_KEY", "1234"):
+        st.session_state["auth"] = True
         st.rerun()
     st.stop()
 
-# BARRA DE STATUS
-conn = w3.is_connected()
-st.sidebar.success("SISTEMA ONLINE" if conn else "SISTEMA OFFLINE")
-st.sidebar.write(f"Rede: Polygon PoS")
+# STATUS
+st.sidebar.markdown(f"**Status:** {'🟢 ONLINE' if w3.is_connected() else '🔴 OFFLINE'}")
 
-# COLUNAS DE MÓDULOS
-col1, col2, col3 = st.columns(3)
-
-def render_modulo(col, titulo, carteira_env, alvo):
-    addr = os.environ.get(carteira_env, "")
-    with col:
-        st.subheader(titulo)
-        if addr:
-            chk = w3.to_checksum_address(addr.strip())
-            pol = round(w3.from_wei(w3.eth.get_balance(chk), 'ether'), 4)
-            usdc = get_bal("USDC", chk)
-            st.metric("POL (Gas)", pol)
-            st.metric("USDC", usdc)
-            if alvo != "MULTI":
-                st.metric(alvo, get_bal(alvo, chk))
-            
-            if st.button(f"EXECUTAR {alvo}", key=titulo):
-                tx = "0x" + os.urandom(20).hex()
-                with sqlite3.connect('historico.db') as conn:
-                    conn.execute("INSERT INTO logs (data, mod, acao, hash) VALUES (?,?,?,?)", 
-                                 (datetime.now().strftime("%H:%M:%S"), titulo, f"SWAP {alvo}", tx))
-                st.success(f"Ordem enviada: {tx[:10]}...")
-        else:
-            st.error("Carteira não configurada")
-
-render_modulo(col1, "MÓDULO 01", "WALLET_01", "WBTC")
-render_modulo(col2, "MÓDULO 02", "WALLET_02", "USDT")
-render_modulo(col3, "MÓDULO 03", "WALLET_03", "MULTI")
+# MÓDULOS
+c1, c2, c3 = st.columns(3)
+render_modulo(c1, "MÓDULO 01", "WALLET_01", "WBTC")
+render_modulo(c2, "MÓDULO 02", "WALLET_02", "USDT")
+render_modulo(c3, "MÓDULO 03", "WALLET_03", "MULTI")
 
 # HISTÓRICO
 st.divider()
-st.subheader("📜 Histórico de Operações")
-conn = sqlite3.connect('historico.db')
+st.subheader("📜 Histórico")
 try:
-    import pandas as pd
-    df = pd.read_sql_query("SELECT data as HORA, mod as MODULO, acao as ACAO, hash as HASH FROM logs ORDER BY id DESC LIMIT 10", conn)
-    st.table(df)
+    with sqlite3.connect('historico.db') as conn:
+        import pandas as pd
+        df = pd.read_sql_query("SELECT data, mod, acao, hash FROM logs ORDER BY id DESC LIMIT 10", conn)
+        if not df.empty:
+            st.table(df)
+        else:
+            st.info("Nenhuma operação hoje.")
 except:
-    st.write("Nenhuma operação registrada.")
-conn.close()
-
-if st.button("ATUALIZAR DADOS"):
-    st.rerun()
+    st.write("Aguardando transações...")

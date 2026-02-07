@@ -3,69 +3,90 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, requests
 
-# --- SISTEMA DE LOGIN SEGURO ---
+# --- 1. CONFIGURAÇÃO DE PÁGINA (DEVE SER A PRIMEIRA COISA) ---
+st.set_page_config(page_title="COMMANDER OMNI", layout="wide")
+
+# --- 2. SISTEMA DE LOGIN ---
 def login():
     if "logado" not in st.session_state:
         st.session_state.logado = False
-
     if not st.session_state.logado:
-        st.title("🛡️ COMMANDER OMNI | ACESSO RESTRITO")
-        
-        # Tenta ler a senha dos Secrets, se não existir usa uma padrão
+        st.title("🔐 QG GUARDION | LOGIN")
         try:
             senha_mestre = st.secrets["SECRET_KEY"]
         except:
-            st.warning("⚠️ SECRET_KEY não configurada nos Secrets. Usando padrão: mestre123")
-            senha_mestre = "mestre123"
-
-        senha_input = st.text_input("Introduza a Chave do QG:", type="password")
+            senha_mestre = "mestre123" # Senha padrão se o Secret falhar
         
-        if st.button("AUTENTICAR"):
+        senha_input = st.text_input("Senha de Acesso:", type="password")
+        if st.button("ENTRAR"):
             if senha_input == senha_mestre:
                 st.session_state.logado = True
-                st.success("Acesso concedido!")
                 st.rerun()
             else:
-                st.error("Chave incorreta. Acesso negado.")
-        st.stop() # Interrompe o código aqui se não estiver logado
+                st.error("Senha incorreta!")
+        st.stop()
 
 login()
 
-# --- SEÇÃO OPERACIONAL (SÓ CARREGA APÓS LOGIN) ---
-st.set_page_config(page_title="COMMANDER OMNI", layout="wide")
+# --- 3. INICIALIZAÇÃO DO BANCO (PROTEGIDA) ---
+def init_db():
+    conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
+    # Garante que a tabela existe antes de qualquer SELECT
+    conn.execute('''CREATE TABLE IF NOT EXISTS agentes_v4 
+                    (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+                    alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT)''')
+    conn.commit()
+    return conn
+
+db = init_db()
+
+# --- 4. INTERFACE E LÓGICA ---
 w3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
+st.title("🛡️ PAINEL OPERACIONAL")
+
 with st.sidebar:
-    st.header("👤 COMANDANTE")
-    if st.button("LOGOUT / SAIR"):
+    st.header("⚙️ COMANDO")
+    if st.button("SAIR"):
         st.session_state.logado = False
         st.rerun()
+    
     st.divider()
-    # Aqui entra o campo da PK_01 que já configuramos
-    pk_m = st.text_input("PK_01 (Mestre):", type="password")
+    pk_m = st.text_input("Sua PK_01:", type="password")
+    
+    if st.button("🚀 GERAR 25 SNIPERS"):
+        db.execute("DELETE FROM agentes_v4")
+        novos = []
+        for i in range(25):
+            acc = Account.create()
+            alvo = 102500.0 - (i * 200)
+            novos.append((f"SNIPER-{i+1:02d}", acc.address, acc.key.hex(), alvo, "VIGILANCIA", 0.0, "Aguardando"))
+        db.executemany("INSERT INTO agentes_v4 (nome, endereco, privada, alvo, status, preco_compra, ultima_acao) VALUES (?,?,?,?,?,?,?)", novos)
+        db.commit()
+        st.success("Batalhão Criado!")
+        st.rerun()
 
-# --- BANCO E LÓGICA ---
-conn = sqlite3.connect('guardion_v4.db', check_same_thread=False)
-st.title("🛡️ PAINEL DE CONTROLO ATIVO")
-
-# Exemplo de monitor de preço que já tínhamos
+# --- 5. EXIBIÇÃO DOS AGENTES (AGORA SEGURO) ---
 try:
-    btc = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price']
-    st.metric("BTC/USDT", f"${float(btc):,.2f}")
-except:
-    st.write("A aguardar conexão com a Binance...")
+    btc = float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price'])
+    st.metric("BTC ATUAL", f"${btc:,.2f}")
+    
+    # Busca os agentes - Se a tabela estiver vazia, ele apenas não mostra nada (sem erro)
+    agentes = db.execute("SELECT * FROM agentes_v4").fetchall()
+    
+    if agentes:
+        cols = st.columns(5)
+        for idx, ag in enumerate(agentes):
+            with cols[idx % 5]:
+                with st.container(border=True):
+                    st.write(f"**{ag[1]}**")
+                    st.caption(f"Status: {ag[5]}")
+                    st.write(f"🎯 ${ag[4]:,.0f}")
+    else:
+        st.info("Nenhum sniper em campo. Use o botão 'Gerar' na lateral.")
 
-# Listagem dos 25 Agentes
-agentes = conn.execute("SELECT * FROM agentes_v4").fetchall()
-if agentes:
-    cols = st.columns(5)
-    for idx, ag in enumerate(agentes):
-        with cols[idx % 5]:
-            with st.container(border=True):
-                st.write(f"**{ag[1]}**")
-                st.caption(f"Status: {ag[5]}")
-else:
-    st.info("Batalhão pronto para ser gerado.")
+except Exception as e:
+    st.error("Erro de conexão ou banco de dados. Tente dar 'Reboot' no app.")
 
 time.sleep(30)
 st.rerun()

@@ -11,7 +11,6 @@ EXPLORER_URL = "https://polygonscan.com/tx/"
 # --- LOGIN SEGURO ---
 SENHA_MESTRA = st.secrets.get("SECRET_KEY", "mestre2026")
 if "logado" not in st.session_state: st.session_state.logado = False
-
 if not st.session_state.logado:
     st.title("🔐 QG GUARDION v12.9")
     senha = st.text_input("Chave do QG:", type="password")
@@ -30,71 +29,70 @@ db.execute('''CREATE TABLE IF NOT EXISTS agentes_v6
                 alvo REAL, status TEXT, preco_compra REAL, ultima_acao TEXT, last_hash TEXT)''')
 db.commit()
 
-# --- MOTOR DE PREÇO (COM BYPASS DE ERRO) ---
+# --- MOTOR DE PREÇO (RESILIENTE) ---
 def pegar_preco():
     headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        # Tenta Binance
+    try: 
         return float(requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=3, headers=headers).json()['price'])
     except:
-        try:
-            # Tenta CoinGecko (Backup)
-            return float(requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd").json()['bitcoin']['usd'])
-        except:
-            return None
+        try: return float(requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd").json()['bitcoin']['usd'])
+        except: return None
 
-# --- LOGÍSTICA DE GÁS (DIVIDIR POL) ---
-def dividir_pol(pk_mestra, valor):
+# --- FUNÇÃO: CÁLCULO E DIVISÃO AUTOMÁTICA DE POL ---
+def auto_dividir_pol(pk_mestra):
     w3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
-    if not w3.is_connected():
-        st.error("Erro ao conectar na rede Polygon!")
-        return
+    if not w3.is_connected(): return st.error("Erro RPC")
     
     mestra = Account.from_key(pk_mestra)
-    agentes = db.execute("SELECT endereco FROM agentes_v6").fetchall()
-    st.warning(f"🚀 Enviando {valor} POL para {len(agentes)} snipers...")
+    saldo_wei = w3.eth.get_balance(mestra.address)
+    saldo_pol = float(w3.from_wei(saldo_wei, 'ether'))
     
-    progresso = st.progress(0)
-    for i, (end,) in enumerate(agentes):
+    # Lógica: Mantém 0.5 POL na mestra e divide o resto por 50
+    reserva = 0.5
+    if saldo_pol <= reserva:
+        return st.error(f"Saldo insuficiente! Você tem apenas {saldo_pol:.4f} POL.")
+    
+    valor_cada = (saldo_pol - reserva) / 50
+    st.warning(f"🚀 Enviando {valor_cada:.4f} POL para cada sniper...")
+    
+    agentes = db.execute("SELECT endereco, nome FROM agentes_v6").fetchall()
+    barra = st.progress(0)
+    for i, (end, nome) in enumerate(agentes):
         try:
             tx = {
                 'nonce': w3.eth.get_transaction_count(mestra.address),
                 'to': end,
-                'value': w3.to_wei(valor, 'ether'),
+                'value': w3.to_wei(valor_cada, 'ether'),
                 'gas': 21000,
                 'gasPrice': w3.eth.gas_price,
                 'chainId': 137
             }
             assinado = w3.eth.account.sign_transaction(tx, pk_mestra)
-            w3.eth.send_raw_transaction(assinado.raw_transaction)
-            progresso.progress((i+1)/len(agentes))
+            tx_hash = w3.eth.send_raw_transaction(assinado.raw_transaction)
+            db.execute("UPDATE agentes_v6 SET last_hash=?, ultima_acao='ABASTECIDO' WHERE endereco=?", (tx_hash.hex(), end))
+            db.commit()
+            barra.progress((i + 1) / 50)
+            time.sleep(0.1) # Proteção contra rate limit
         except Exception as e:
-            st.error(f"Erro no envio {i}: {e}")
+            st.error(f"Erro no {nome}: {e}")
             break
-    st.success("⛽ Gás distribuído com sucesso!")
+    st.success("⛽ Logística concluída!")
 
 # --- UI PRINCIPAL ---
 st.title("🛡️ COMMANDER OMNI v12.9")
 btc = pegar_preco()
 
-# FALLBACK: Se não houver sinal, permite manual
-if btc is None:
-    st.error("⚠️ SEM SINAL DE REDE.")
-    btc_input = st.number_input("DIGITE O PREÇO ATUAL PARA OPERAR MANUALMENTE:", value=0.0)
-    if btc_input > 0:
-        btc = btc_input
-
 if btc:
-    st.metric("BTC ATUAL", f"${btc:,.2f}", delta="OPERANDO")
+    st.metric("BTC ATUAL", f"${btc:,.2f}")
     
     with st.sidebar:
-        st.header("⚙️ CONFIGURAÇÕES")
+        st.header("⚙️ COMANDO CENTRAL")
         if "pk_gas" not in st.session_state: st.session_state.pk_gas = ""
         st.session_state.pk_gas = st.text_input("Sua PK Mestra:", value=st.session_state.pk_gas, type="password")
         
         tp = st.slider("Take Profit (%)", 0.1, 5.0, 1.5)
         
-        if st.button("🚀 REGERAR SNIPERS"):
+        if st.button("🚀 REINICIAR 50 SNIPERS"):
             db.execute("DELETE FROM agentes_v6")
             for i in range(50):
                 acc = Account.create()
@@ -102,43 +100,48 @@ if btc:
                            (f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), btc - (i * 150), "VIGILANCIA", 0.0, "Pronto", ""))
             db.commit()
             st.rerun()
-
+            
         st.divider()
-        valor_dist = st.number_input("POL p/ Sniper:", value=0.1)
-        if st.button("💸 DIVIDIR POL"):
-            if st.session_state.pk_gas: dividir_pol(st.session_state.pk_gas, valor_dist)
-            else: st.warning("Coloque a PK Mestra!")
+        st.header("⛽ LOGÍSTICA")
+        if st.button("💸 AUTO-DIVIDIR SALDO POL"):
+            if st.session_state.pk_gas: auto_dividir_pol(st.session_state.pk_gas)
+            else: st.warning("Insira a PK Mestra!")
 
-    # --- MOTOR DE TRADE ATIVO INFINITO ---
+    # Motor de Trade (Take Profit Ativo Infinito)
     agentes = db.execute("SELECT * FROM agentes_v6").fetchall()
     for ag in agentes:
         id_ag, nome, _, _, alvo, status, p_compra, _, _ = ag
-        # Compra no Grid
         if btc <= alvo and status == "VIGILANCIA":
-            db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=?, last_hash='TX_PENDENTE' WHERE id=?", (btc, id_ag))
+            db.execute("UPDATE agentes_v6 SET status='COMPRADO', preco_compra=?, last_hash='Aguardando...' WHERE id=?", (btc, id_ag))
             db.commit()
-        # Take Profit Ativo Infinito
         elif status == "COMPRADO" and btc >= p_compra * (1 + (tp/100)):
-            db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, last_hash='TX_SUCCESS' WHERE id=?", (id_ag,))
+            db.execute("UPDATE agentes_v6 SET status='VIGILANCIA', preco_compra=0.0, ultima_acao='TP Reset' WHERE id=?", (id_ag,))
             db.commit()
 
     # --- TABS ---
-    t1, t2 = st.tabs(["🎯 Monitor", "📜 Histórico"])
-    with t1:
+    tab1, tab2 = st.tabs(["🎯 Monitor", "📜 Histórico On-Chain"])
+    with tab1:
         cols = st.columns(5)
         for i, a in enumerate(agentes):
             with cols[i % 5]:
                 with st.container(border=True):
                     st.write(f"**{a[1]}**")
                     st.caption(f"S: {a[5]}")
-    with t2:
+
+    with tab2:
+        st.subheader("🕵️ Histórico de Hashes")
         df = pd.DataFrame(agentes, columns=['ID', 'Nome', 'End', 'Key', 'Alvo', 'Status', 'P.Compra', 'Ação', 'Hash'])
         for _, row in df[df['Hash'] != ""].iterrows():
-            st.code(f"{row['Nome']} | Hash: {row['Hash']}")
-            if "0x" in str(row['Hash']): st.link_button("Ver no PolygonScan", f"{EXPLORER_URL}{row['Hash']}")
+            c1, c2 = st.columns([4, 1])
+            c1.code(f"{row['Nome']} | {row['Hash']}")
+            if "0x" in str(row['Hash']):
+                c2.link_button("Explorer", f"{EXPLORER_URL}{row['Hash']}")
+            st.divider()
 
 else:
-    st.info("Aguardando conexão ou entrada manual do preço...")
+    st.error("⚠️ SEM SINAL DE REDE.")
+    time.sleep(5)
+    st.rerun()
 
 time.sleep(15)
 st.rerun()

@@ -2,63 +2,59 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>OMNI Agente Multi</title>
+    <title>Agente Multi-Estratégia</title>
     <style>
-        body { background: #0f172a; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; padding: 40px; }
-        .grid { display: flex; justify-content: center; gap: 25px; flex-wrap: wrap; }
-        .card { background: #1e293b; border: 2px solid #3b82f6; padding: 25px; border-radius: 20px; width: 300px; transition: 0.3s; }
-        .card:hover { transform: translateY(-5px); border-color: #f7931a; }
-        .qr-bg { background: white; padding: 10px; border-radius: 10px; margin: 20px 0; display: inline-block; }
-        .btn-wbtc { 
-            background: linear-gradient(45deg, #f7931a, #ffab40); color: white; border: none; 
-            padding: 15px 25px; width: 100%; border-radius: 10px; font-weight: bold; 
-            cursor: pointer; font-size: 16px; box-shadow: 0 4px 15px rgba(247, 147, 26, 0.4);
-        }
-        .btn-wbtc:active { transform: scale(0.98); }
-        .status { margin-top: 15px; font-weight: bold; min-height: 24px; color: #10b981; }
+        body { background: #020617; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; }
+        .grid { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 20px; }
+        .card { background: #0f172a; border: 2px solid #1e293b; padding: 20px; border-radius: 15px; width: 280px; transition: 0.3s; }
+        .card:hover { border-color: #3b82f6; }
+        .qr-img { background: white; padding: 10px; border-radius: 8px; margin: 15px 0; }
+        .btn { border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; color: white; }
+        .btn-btc { background: #f7931a; } /* Laranja Bitcoin */
+        .btn-usdt { background: #26a17b; } /* Verde Tether */
+        .btn-multi { background: #8b5cf6; } /* Roxo Multi */
+        .status { margin-top: 10px; font-size: 13px; color: #10b981; min-height: 20px; }
     </style>
 </head>
 <body>
-    <h1>SISTEMA DE ENTRADA WBTC</h1>
-    <p style="color: #94a3b8;">Agente estratégico operando na rede Polygon</p>
-
+    <h1>PAINEL DE OPERAÇÕES AGENTE OMNI</h1>
     <div class="grid">
-        {% for nome, carteira in modulos.items() %}
         <div class="card">
-            <h2 style="color: #3b82f6; margin: 0;">{{ nome }}</h2>
-            <div class="qr-bg">
-                <img src="/qr/{{ carteira }}" width="180">
-            </div>
-            <p style="font-size: 10px; color: #64748b; word-break: break-all;">{{ carteira }}</p>
-            
-            <button class="btn-wbtc" onclick="chamarAgente('{{ nome }}')">
-                CONVERTER PARA WBTC
-            </button>
-            <div id="info-{{ nome }}" class="status"></div>
+            <h3>MOD_01 (BTC)</h3>
+            <p><small>Troca USDC ➔ WBTC</small></p>
+            <img src="/qr/{{ modulos.MOD_01 }}" class="qr-img" width="160">
+            <button class="btn btn-btc" onclick="operar('MOD_01')">CONVERTER EM WBTC</button>
+            <div id="msg-MOD_01" class="status"></div>
         </div>
-        {% endfor %}
+
+        <div class="card">
+            <h3>MOD_02 (USDT)</h3>
+            <p><small>Troca USDC ➔ TETHER</small></p>
+            <img src="/qr/{{ modulos.MOD_02 }}" class="qr-img" width="160">
+            <button class="btn btn-usdt" onclick="operar('MOD_02')">CONVERTER EM USDT</button>
+            <div id="msg-MOD_02" class="status"></div>
+        </div>
+
+        <div class="card">
+            <h3>MOD_03 (MULTI)</h3>
+            <p><small>Troca em Várias Cryptos</small></p>
+            <img src="/qr/{{ modulos.MOD_03 }}" class="qr-img" width="160">
+            <button class="btn btn-multi" onclick="operar('MOD_03')">DIVERSIFICAR AGORA</button>
+            <div id="msg-MOD_03" class="status"></div>
+        </div>
     </div>
 
     <script>
-        async function chamarAgente(idMod) {
-            const statusBox = document.getElementById('info-' + idMod);
-            statusBox.innerText = "Agente em execução...";
-            statusBox.style.color = "#f7931a";
-
-            try {
-                const response = await fetch('/converter', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ modulo: idMod })
-                });
-                
-                const data = await response.json();
-                statusBox.innerText = data.msg;
-                statusBox.style.color = "#10b981";
-            } catch (err) {
-                statusBox.innerText = "Erro: Agente fora de alcance.";
-                statusBox.style.color = "#ef4444";
-            }
+        async function operar(id) {
+            const status = document.getElementById('msg-' + id);
+            status.innerText = "Agente processando...";
+            const res = await fetch('/converter', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({modulo: id})
+            });
+            const data = await res.json();
+            status.innerText = data.msg;
         }
     </script>
 </body>

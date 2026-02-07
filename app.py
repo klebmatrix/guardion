@@ -3,109 +3,84 @@ from web3 import Web3
 from eth_account import Account
 import sqlite3, time, random, pandas as pd
 
-# --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="GUARDION OMNI v16.3", layout="wide")
-st.cache_data.clear()
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="GUARDION OMNI v16.4", layout="wide")
+RPC_POLYGON = "https://polygon-rpc.com"
+W3 = Web3(Web3.HTTPProvider(RPC_POLYGON))
 
-# --- LOGIN (BYPASS ATIVADO) ---
-if "logado" not in st.session_state: st.session_state.logado = True # Força entrada direta
+# --- BANCO DE DADOS ---
+db = sqlite3.connect('guardion_v16_4.db', check_same_thread=False)
+db.execute('''CREATE TABLE IF NOT EXISTS agentes 
+            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, 
+            alvo REAL, status TEXT, preco_compra REAL, lucro_real REAL, hash TEXT)''')
+db.commit()
 
-# --- BANCO DE DADOS (NOVO ARQUIVO PARA EVITAR CONFLITO) ---
-db = sqlite3.connect('guardion_v16_3.db', check_same_thread=False)
-
-def criar_tabela():
-    db.execute('''CREATE TABLE IF NOT EXISTS agentes 
-                (id INTEGER PRIMARY KEY, nome TEXT, ativo TEXT, endereco TEXT, privada TEXT, 
-                alvo REAL, status TEXT, preco_compra REAL, lucro_real REAL, hash TEXT)''')
-    db.commit()
-
-criar_tabela()
-
-# --- MOTOR DO PILOTO AUTOMÁTICO ---
-if "preco_mercado" not in st.session_state: st.session_state.preco_mercado = 96500.0
-if "auto_pilot" not in st.session_state: st.session_state.auto_pilot = True # Já começa ligado
-
-# Simulação de oscilação real (-0.4% a +0.4%)
-if st.session_state.auto_pilot:
-    oscilacao = st.session_state.preco_mercado * random.uniform(-0.004, 0.004)
-    st.session_state.preco_mercado += oscilacao
+# --- FUNÇÃO DE SAQUE (RETIRAR) ---
+def realizar_saque_total(endereco_destino):
+    st.warning(f"Iniciando retirada para {endereco_destino}...")
+    agentes = db.execute("SELECT endereco, privada, nome FROM agentes").fetchall()
+    sucesso = 0
+    for end_ag, priv_ag, nome in agentes:
+        try:
+            saldo = W3.eth.get_balance(end_ag)
+            if saldo > W3.to_wei(0.02, 'ether'):
+                tx = {
+                    'nonce': W3.eth.get_transaction_count(end_ag),
+                    'to': endereco_destino,
+                    'value': saldo - W3.to_wei(0.01, 'ether'), # Deixa taxa de gás
+                    'gas': 21000,
+                    'gasPrice': W3.eth.gas_price,
+                    'chainId': 137
+                }
+                assinado = W3.eth.account.sign_transaction(tx, priv_ag)
+                W3.eth.send_raw_transaction(assinado.raw_transaction)
+                sucesso += 1
+        except: continue
+    st.success(f"Saque concluído! {sucesso} agentes enviaram fundos.")
 
 # --- INTERFACE ---
-st.title("🛡️ COMMANDER OMNI v16.3 | PILOTO AUTOMÁTICO")
+st.title("🛡️ COMMANDER OMNI | OPERAÇÃO DE RESGATE")
+
+if "preco" not in st.session_state: st.session_state.preco = 96000.0
 
 with st.sidebar:
-    st.header("⚙️ SISTEMA OPERACIONAL")
-    st.session_state.auto_pilot = st.toggle("PILOTO AUTOMÁTICO", value=st.session_state.auto_pilot)
-    
-    ativo_principal = st.selectbox("Escolha o Ativo:", ["BTC", "ETH", "POL", "SOL"])
-    tp_pct = st.slider("Take Profit (%)", 0.1, 3.0, 0.8)
+    st.header("🎮 PAINEL DE CONTROLE")
+    st.session_state.preco += st.session_state.preco * random.uniform(-0.002, 0.002)
+    st.metric("Preço SIN", f"${st.session_state.preco:,.2f}")
     
     st.divider()
-    if st.button("🚀 REINICIAR E ALINHAR 50 SNIPERS"):
+    st.subheader("💰 ÁREA DE RETIRADA")
+    carteira_mestra = st.text_input("Endereço de Destino (Sua Carteira):", placeholder="0x...")
+    
+    if st.button("🏦 RESGATAR LUCROS (SAQUE TOTAL)"):
+        if Web3.is_address(carteira_mestra):
+            realizar_saque_total(carteira_mestra)
+        else:
+            st.error("Endereço Inválido! Insira sua carteira 0x...")
+
+    st.divider()
+    if st.button("🚀 REINICIAR GRID"):
         db.execute("DELETE FROM agentes")
         for i in range(50):
             acc = Account.create()
-            # Grid de entrada: cada sniper espera uma queda maior que o anterior
-            alvo_agente = st.session_state.preco_mercado * (1 - (i * 0.001))
-            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?,?)",
-                       (i, f"SNPR-{i+1:02d}", ativo_principal, acc.address, acc.key.hex(), 
-                        alvo_agente, "VIGILANCIA", 0.0, 0.0, ""))
+            db.execute("INSERT INTO agentes VALUES (?,?,?,?,?,?,?,?,?)",
+                       (i, f"SNPR-{i+1:02d}", acc.address, acc.key.hex(), st.session_state.preco, "VIGILANCIA", 0.0, 0.0, ""))
         db.commit()
         st.rerun()
 
-# --- PROCESSAMENTO DE TRADE INFINITO ---
-p_atual = st.session_state.preco_mercado
-try:
-    agentes = db.execute("SELECT * FROM agentes").fetchall()
-    
-    for ag in agentes:
-        id_ag, nome, moeda, end, priv, alvo, status, p_compra, lucro, last_h = ag
-        
-        # COMPRA (Ao atingir o Alvo)
-        if p_atual <= alvo and status == "VIGILANCIA":
-            h = f"0x{int(time.time())}B{id_ag}REAL"
-            db.execute("UPDATE agentes SET status='COMPRADO', preco_compra=?, hash=? WHERE id=?", (p_atual, h, id_ag))
-            db.commit()
-        
-        # VENDA (Take Profit Infinito)
-        elif status == "COMPRADO" and p_atual >= p_compra * (1 + (tp_pct/100)):
-            lucro_venda = p_atual - p_compra
-            h = f"0x{int(time.time())}S{id_ag}REAL"
-            db.execute("UPDATE agentes SET status='VIGILANCIA', preco_compra=0.0, lucro_real=?, hash=? WHERE id=?", 
-                       (lucro + lucro_venda, h, id_ag))
-            db.commit()
+# --- MONITOR ---
+agentes = db.execute("SELECT * FROM agentes").fetchall()
+st.subheader(f"💵 Lucro Total Disponível: :green[${sum([a[7] for a in agentes]):,.2f}]")
 
-    # --- EXIBIÇÃO ---
-    st.metric(f"PREÇO ATUAL {ativo_principal}", f"${p_atual:,.2f}", 
-              delta=f"{((p_atual/96500.0)-1)*100:.2f}%")
-    
-    st.subheader(f"💵 LUCRO REAL ACUMULADO: :green[${sum([a[8] for a in agentes]):,.2f}]")
 
-    tab1, tab2 = st.tabs(["🎯 Monitor do Grid", "📜 Hashes de Cópia"])
-    
-    with tab1:
-        cols = st.columns(5)
-        for i, a in enumerate(agentes):
-            with cols[i % 5]:
-                with st.container(border=True):
-                    st.write(f"**{a[1]}**")
-                    st.write(f"Lucro: ${a[8]:,.2f}")
-                    if a[6] == "COMPRADO":
-                        st.warning("💰 EM POSIÇÃO")
-                    else:
-                        st.info("🔭 AGUARDANDO")
 
-    with tab2:
-        for a in agentes:
-            if a[9]:
-                c1, c2 = st.columns([1, 4])
-                c1.write(f"**{a[1]}**")
-                c2.code(a[9], language="text") # Botão de copiar embutido
-                st.divider()
+cols = st.columns(5)
+for i, a in enumerate(agentes):
+    with cols[i % 5]:
+        with st.container(border=True):
+            st.write(f"**{a[1]}**")
+            st.write(f"Lucro: ${a[7]:,.2f}")
+            st.caption(f"Status: {a[5]}")
 
-except Exception as e:
-    st.error(f"Sistema Travado: {e}")
-
-# Atualização automática para o Piloto Automático funcionar
-time.sleep(3)
+time.sleep(4)
 st.rerun()

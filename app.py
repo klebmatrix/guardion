@@ -1,70 +1,62 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, random
 
-# --- CONEXÃO (LlamaNodes para evitar o erro de 'Too Many Requests') ---
-W3 = Web3(Web3.HTTPProvider("https://polygon.llamarpc.com"))
+# CONEXÃO ESTÁVEL
+W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
 
-st.set_page_config(page_title="GUARDION v25.0 - UNFREEZE", layout="wide")
+st.set_page_config(page_title="GUARDION v29.0 - CASH OUT", layout="wide")
 
-# --- DATABASE ---
-db = sqlite3.connect('guardion_v25.db', check_same_thread=False)
-db.execute('''CREATE TABLE IF NOT EXISTS snipers 
-            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT)''')
-db.commit()
+st.title("💰 RESGATE DE FUNDOS REAIS (POL)")
 
-# --- INTERFACE LIMPA ---
-st.title("🛡️ GUARDION v25.0 | CONTROLE DE SAQUE")
-
-# Seção de Destino (Sua Carteira)
-st.subheader("🎯 Onde o lucro vai cair:")
-carteira_final = st.text_input("Cole sua carteira MetaMask aqui:", placeholder="0x...", key="main_wallet")
-
-if "lucro" not in st.session_state: st.session_state.lucro = 9980.0
-st.session_state.lucro += random.uniform(2.0, 15.0)
-
-# Alerta de Meta
-if st.session_state.lucro >= 10000:
-    st.success(f"💰 META DE $10.000 ATINGIDA! SISTEMA PRONTO PARA SAQUE.")
-    st.balloons()
-else:
-    st.metric("LUCRO ACUMULADO", f"${st.session_state.lucro:,.2f}", delta="BUSCANDO META")
+# 1. CARTEIRA QUE RECEBE
+st.subheader("🎯 Carteira de Destino (Sua MetaMask)")
+carteira_destino = st.text_input("Cole seu endereço 0x...", placeholder="0x...")
 
 st.divider()
 
-# --- LISTA DOS SNIPERS (SÓ O ESSENCIAL) ---
-snipers = db.execute("SELECT * FROM snipers").fetchall()
+# 2. CHAVE DO SNIPER QUE TEM OS 10.55 POL
+st.subheader("🔑 Chave Privada do Sniper")
+pk_sniper = st.text_input("Cole a Private Key do Sniper com saldo:", type="password")
 
-if not snipers:
-    if st.button("🔄 GERAR SNIPERS AGORA"):
-        db.execute("DELETE FROM snipers")
-        for i in range(10):
-            acc = Account.create()
-            db.execute("INSERT INTO snipers VALUES (?,?,?,?)", (i, f"SNPR-{i+1:02d}", acc.address, acc.key.hex()))
-        db.commit()
-        st.rerun()
-else:
-    # Mostra apenas os que têm saldo para não travar a rede
-    cols = st.columns(2)
-    for i, s in enumerate(snipers):
-        with cols[i % 2]:
-            with st.container(border=True):
-                # Botão de consulta manual para não travar
-                if st.button(f"Consultar ⛽ {s[1]}", key=f"check_{i}"):
-                    try:
-                        b = W3.from_wei(W3.eth.get_balance(s[2]), 'ether')
-                        st.write(f"Saldo Real: **{b:.4f} POL**")
-                    except: st.error("Rede Ocupada")
+if st.button("🚀 SACAR 10.55 POL AGORA", use_container_width=True):
+    if not W3.is_address(carteira_destino):
+        st.error("Endereço de destino inválido!")
+    elif not pk_sniper:
+        st.error("Insira a Private Key!")
+    else:
+        try:
+            conta = Account.from_key(pk_sniper)
+            saldo_total_wei = W3.eth.get_balance(conta.address)
+            
+            # Cálculo agressivo de Gas para não travar
+            gas_price = int(W3.eth.gas_price * 1.3)
+            gas_limit = 21000
+            custo_gas = gas_price * gas_limit
+            
+            valor_saque = saldo_total_wei - custo_gas
+            
+            if valor_saque > 0:
+                tx = {
+                    'nonce': W3.eth.get_transaction_count(conta.address),
+                    'to': carteira_destino,
+                    'value': valor_saque,
+                    'gas': gas_limit,
+                    'gasPrice': gas_price,
+                    'chainId': 137
+                }
                 
-                # BOTÃO DE RETIRADA FORÇADA
-                if st.button(f"💸 RETIRAR PARA MINHA CARTEIRA", key=f"saque_{i}"):
-                    if not carteira_final:
-                        st.error("ERRO: Cole sua carteira no topo primeiro!")
-                    else:
-                        st.info("Iniciando transferência real...")
-                        # Aqui entra a lógica de envio de POL que discutimos
+                signed = W3.eth.account.sign_transaction(tx, pk_sniper)
+                tx_hash = W3.eth.send_raw_transaction(signed.raw_transaction)
+                
+                st.success("✅ SUCESSO! O DINHEIRO ESTÁ A CAMINHO.")
+                st.balloons()
+                st.info(f"Hash da Transação: {W3.to_hex(tx_hash)}")
+                st.write(f"Valor enviado: {W3.from_wei(valor_saque, 'ether')} POL")
+            else:
+                st.error("Saldo insuficiente para pagar a taxa de rede.")
+        except Exception as e:
+            st.error(f"ERRO NA BLOCKCHAIN: {e}")
 
-# --- REFRESH LENTO PARA NÃO TRAVAR ---
-time.sleep(5)
-st.rerun()
+st.divider()
+st.caption("Certifique-se de estar na rede Polygon na sua MetaMask para ver o saldo cair.")

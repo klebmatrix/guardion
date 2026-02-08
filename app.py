@@ -1,91 +1,62 @@
 import streamlit as st
 from web3 import Web3
 from eth_account import Account
-import sqlite3, time, random
 
-# CONEXÃO REAL
 W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+st.set_page_config(page_title="GUARDION v36.0 - RESGATE", layout="wide")
 
-st.set_page_config(page_title="GUARDION v35.0 - TURBO 10", layout="wide")
+st.title("🚨 CENTRAL DE RESGATE E RASTREIO")
 
-# BANCO DE DADOS
-db = sqlite3.connect('guardion_v35.db', check_same_thread=False)
-db.execute('''CREATE TABLE IF NOT EXISTS agentes 
-            (id INTEGER PRIMARY KEY, nome TEXT, endereco TEXT, privada TEXT, lucro REAL)''')
-db.commit()
+# 1. DESTINO MESTRE
+carteira_destino = "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"
+st.write(f"🎯 O dinheiro deve cair em: `{carteira_destino}`")
 
-# --- MOTOR TURBO DEZ ---
-if "lucro_sessao" not in st.session_state: st.session_state.lucro_sessao = 9500.0 # Começa alto pra vc ver o saque logo
-if "preco" not in st.session_state: st.session_state.preco = 98000.0
+st.divider()
 
-# Subida agressiva de 10 em 10 para bater a meta rápido
-salto = random.uniform(15.0, 45.0) 
-st.session_state.preco += salto
-st.session_state.lucro_sessao += (salto * 5.5) # Multiplicador Turbo
+# 2. RESGATE POR CHAVE PRIVADA (A FORMA MAIS SEGURA)
+st.subheader("🔑 Resgate por Chave Privada")
+st.write("Se você tem a Private Key do sniper onde mandou o dinheiro, cole abaixo:")
+pk_input = st.text_input("Cole a Private Key aqui:", type="password")
 
-# --- FUNÇÃO DE SAQUE ---
-def sacar_agora(privada, destino):
+if st.button("💸 FORÇAR SAQUE IMEDIATO"):
+    if pk_input:
+        try:
+            acc = Account.from_key(pk_input)
+            saldo = W3.eth.get_balance(acc.address)
+            st.write(f"Endereço da Chave: `{acc.address}`")
+            st.write(f"Saldo encontrado: **{W3.from_wei(saldo, 'ether')} POL**")
+            
+            if saldo > 0:
+                gas_price = int(W3.eth.gas_price * 2.0)
+                taxa = gas_price * 21000
+                tx = {
+                    'nonce': W3.eth.get_transaction_count(acc.address),
+                    'to': W3.to_checksum_address(carteira_destino),
+                    'value': saldo - taxa,
+                    'gas': 21000,
+                    'gasPrice': gas_price,
+                    'chainId': 137
+                }
+                signed = W3.eth.account.sign_transaction(tx, pk_input)
+                h = W3.eth.send_raw_transaction(signed.raw_transaction)
+                st.success(f"✅ ENVIADO! Hash: {W3.to_hex(h)}")
+                st.balloons()
+            else:
+                st.error("Esta chave não tem saldo (POL) para sacar.")
+        except Exception as e:
+            st.error(f"Erro: {e}")
+
+st.divider()
+
+# 3. VERIFICADOR DE SALDO (RAIO-X)
+st.subheader("🔍 Raio-X de Endereço")
+addr_check = st.text_input("Cole o endereço do Sniper aqui para ver se o dinheiro está nele:")
+if st.button("Checar Saldo"):
     try:
-        conta = Account.from_key(privada)
-        saldo_wei = W3.eth.get_balance(conta.address)
-        gas_price = int(W3.eth.gas_price * 1.5)
-        taxa = gas_price * 21000
-        if saldo_wei > taxa:
-            tx = {'nonce': W3.eth.get_transaction_count(conta.address), 'to': W3.to_checksum_address(destino),
-                  'value': saldo_wei - taxa, 'gas': 21000, 'gasPrice': gas_price, 'chainId': 137}
-            signed = W3.eth.account.sign_transaction(tx, privada)
-            h = W3.eth.send_raw_transaction(signed.raw_transaction)
-            return f"✅ ENVIADO: {W3.to_hex(h)[:10]}"
-        return "❌ SEM POL"
-    except Exception as e: return f"❌ ERRO: {str(e)}"
-
-# --- INTERFACE ---
-st.title("🛡️ OPERAÇÃO TURBO DEZ - SAQUE AUTOMÁTICO")
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    st.metric("LUCRO DA SESSÃO", f"${st.session_state.lucro_sessao:,.2f}", "+ TURBO 10X")
-with col2:
-    progresso = min(st.session_state.lucro_sessao / 10000, 1.0)
-    st.write(f"**Progresso Meta $10k:**")
-    st.progress(progresso)
-
-with st.sidebar:
-    st.header("🎯 CARTEIRA MESTRA")
-    minha_wallet = st.text_input("Sua MetaMask:", value="0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe")
-    if st.button("🔥 REGERAR 10 AGENTES"):
-        db.execute("DELETE FROM agentes")
-        for i in range(10):
-            acc = Account.create()
-            db.execute("INSERT INTO agentes VALUES (?,?,?,?,0.0)", (i, f"AGENTE-{i+1:02d}", acc.address, acc.key.hex(), 0.0))
-        db.commit()
-        st.rerun()
-
-# --- GRADE DE AGENTES ---
-agentes = db.execute("SELECT * FROM agentes").fetchall()
-
-if agentes:
-    # GATILHO AUTOMÁTICO DE SAQUE EM $10.000
-    if st.session_state.lucro_sessao >= 10000:
-        st.success("🔥 META ATINGIDA! RETIRANDO LUCROS REAIS PARA DESPESAS...")
-        for a in agentes:
-            res = sacar_agora(a[3], minha_wallet)
-            if "✅" in res: st.toast(f"{a[1]}: {res}")
-        st.session_state.lucro_sessao = 0 # Reinicia ciclo
-        time.sleep(2)
-        st.rerun()
-
-    cols = st.columns(5)
-    for i, a in enumerate(agentes):
-        with cols[i % 5]:
-            with st.container(border=True):
-                st.write(f"🕵️ **{a[1]}**")
-                try:
-                    s_real = W3.from_wei(W3.eth.get_balance(a[2]), 'ether')
-                    if s_real > 0: st.success(f"{s_real:.4f} POL")
-                except: pass
-                if st.button(f"SACAR", key=f"s_{i}"):
-                    st.info(sacar_agora(a[3], minha_wallet))
-
-time.sleep(2) # Atualização rápida
-st.rerun()
+        b = W3.from_wei(W3.eth.get_balance(addr_check), 'ether')
+        if b > 0:
+            st.success(f"O dinheiro ESTÁ aqui: {b} POL")
+            st.info("Para tirar, você precisa da Chave Privada deste endereço.")
+        else:
+            st.error("Saldo zero neste endereço.")
+    except: st.error("Endereço inválido.")

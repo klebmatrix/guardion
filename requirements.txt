@@ -1,3 +1,2 @@
-flask
 web3
-gunicorn
+python-dotenv

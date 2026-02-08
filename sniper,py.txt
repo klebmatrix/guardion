@@ -1,0 +1,112 @@
+import os
+import time
+import json
+from web3 import Web3
+from dotenv import load_dotenv
+
+# Carrega as chaves do arquivo .env
+load_dotenv()
+
+# --- CONEXÃO E SEGURANÇA ---
+W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+
+# AQUI ESTÁ A CORREÇÃO: Forçamos o Checksum Address logo na entrada
+try:
+    PRIV_KEY = os.getenv("PRIVATE_KEY")
+    # Converte para o formato que o Web3 exige (Mistura maiúsculas e minúsculas)
+    CARTEIRA = W3.to_checksum_address(os.getenv("WALLET_ADDRESS"))
+except Exception as e:
+    print(f"❌ Erro nas configurações do .env: {e}")
+    exit()
+
+# --- ENDEREÇOS OFICIAIS POLYGON ---
+ROUTER_ADDRESS = W3.to_checksum_address("0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe")
+WBTC_ADDRESS = W3.to_checksum_address("0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe")
+WPOL_ADDRESS = W3.to_checksum_address("0x2ee75e39f638b93c17a960f902cb9ef525f4aaf6")
+# ABIs Mínimas (Corrigidas para formato JSON)
+ERC20_ABI = json.loads('[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"success","type":"bool"}],"type":"function"}]')
+ROUTER_ABI = json.loads('[{"inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"name":"swapExactTokensForETH","outputs":[{"name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}]')
+
+def executar_venda_take_profit():
+    print(f"\n[💰] ALVO ATINGIDO! Iniciando Venda Real na Carteira: {CARTEIRA}")
+    try:
+        router = W3.eth.contract(address=ROUTER_ADDRESS, abi=ROUTER_ABI)
+        token = W3.eth.contract(address=WBTC_ADDRESS, abi=ERC20_ABI)
+        
+        saldo_wbtc = token.functions.balanceOf(CARTEIRA).call()
+        if saldo_wbtc == 0:
+            print("❌ Erro: Saldo de WBTC é 0 nesta carteira.")
+            return
+
+        print(f"📦 Saldo detectado: {saldo_wbtc}. Iniciando aprovação...")
+
+        # 1. Approve
+        nonce = W3.eth.get_transaction_count(CARTEIRA)
+        tx_approve = token.functions.approve(ROUTER_ADDRESS, saldo_wbtc).build_transaction({
+            'from': CARTEIRA,
+            'nonce': nonce,
+            'gas': 100000,
+            'gasPrice': W3.eth.gas_price
+        })
+        
+        signed_approve = W3.eth.account.sign_transaction(tx_approve, PRIV_KEY)
+        W3.eth.send_raw_transaction(signed_approve.rawTransaction)
+        print("✅ Aprovação enviada! Aguardando 10 segundos...")
+        time.sleep(10)
+
+        # 2. Swap (Venda)
+        print("💸 Enviando ordem de venda para QuickSwap...")
+        deadline = int(time.time()) + 600
+        path = [WBTC_ADDRESS, WPOL_ADDRESS]
+        
+        tx_swap = router.functions.swapExactTokensForETH(
+            saldo_wbtc,
+            0, # Slippage 0 para teste
+            path,
+            CARTEIRA,
+            deadline
+        ).build_transaction({
+            'from': CARTEIRA,
+            'nonce': nonce + 1,
+            'gas': 250000,
+            'gasPrice': W3.eth.gas_price
+        })
+
+        signed_swap = W3.eth.account.sign_transaction(tx_swap, PRIV_KEY)
+        tx_hash = W3.eth.send_raw_transaction(signed_swap.rawTransaction)
+        print(f"🚀 SUCESSO! Hash da Transação: {tx_hash.hex()}")
+
+    except Exception as e:
+        print(f"❌ Falha na transação real: {e}")
+
+def monitoramento_infinito(preco_compra):
+    # Meta de 5% de lucro
+    meta_lucro = preco_compra * 1.05 
+    print(f"📡 OMNI LOCAL: Infinite Active Ligado.")
+    print(f"🎯 Alvo de Venda: ${meta_lucro:.2f}")
+
+    while True:
+        try:
+            # Simulação de preço (Aqui você integraria com uma API de preço real)
+            preco_atual = meta_lucro + 10 # Forçando a venda para o teste
+            
+            lucro = ((preco_atual - preco_compra) / preco_compra) * 100
+            print(f"📊 Lucro: {lucro:.2f}% | Aguardando Meta...", end="\r")
+
+            if preco_atual >= meta_lucro:
+                executar_venda_take_profit()
+                print("\n[✅] Ciclo de venda concluído.")
+                break # Para o teste. Em modo infinito real, ele voltaria a monitorar.
+                
+            time.sleep(10)
+        except KeyboardInterrupt:
+            print("\nBot desligado manualmente.")
+            break
+
+if __name__ == "__main__":
+    if W3.is_connected():
+        print(f"✅ Conectado à Polygon. Operando carteira: {CARTEIRA}")
+        # Coloque o preço que você pagou aqui para o bot calcular o lucro
+        monitoramento_infinito(60000.00) 
+    else:
+        print("❌ Erro: Não foi possível conectar à rede Polygon.")

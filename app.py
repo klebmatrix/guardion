@@ -2,61 +2,61 @@ import streamlit as st
 from web3 import Web3
 from eth_account import Account
 
-W3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-st.set_page_config(page_title="GUARDION v36.0 - RESGATE", layout="wide")
+# Conexão com RPC alternativa (mais estável)
+W3 = Web3(Web3.HTTPProvider("https://polygon-bor-rpc.publicnode.com"))
 
-st.title("🚨 CENTRAL DE RESGATE E RASTREIO")
+st.title("🚨 CORREÇÃO DE FLUXO E RESGATE")
 
-# 1. DESTINO MESTRE
-carteira_destino = "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"
-st.write(f"🎯 O dinheiro deve cair em: `{carteira_destino}`")
+# 1. SUA CARTEIRA (DESTINO)
+# Já estou aplicando a correção automática (to_checksum_address)
+meu_destino = "0xd885c5f2bbe54d3a7d4b2a401467120137f0ccbe"
+try:
+    carteira_correta = W3.to_checksum_address(meu_destino.strip())
+    st.success(f"Destino Validado: {carteira_correta}")
+except:
+    st.error("Erro fatal no endereço de destino. Verifique os caracteres.")
 
 st.divider()
 
-# 2. RESGATE POR CHAVE PRIVADA (A FORMA MAIS SEGURA)
-st.subheader("🔑 Resgate por Chave Privada")
-st.write("Se você tem a Private Key do sniper onde mandou o dinheiro, cole abaixo:")
-pk_input = st.text_input("Cole a Private Key aqui:", type="password")
+# 2. ENTRADA DA CHAVE DO SNIPER
+st.subheader("🔑 Chave Privada do Sniper que tem os 10.55 POL")
+pk_resgate = st.text_input("Cole a Private Key aqui:", type="password")
 
-if st.button("💸 FORÇAR SAQUE IMEDIATO"):
-    if pk_input:
+if st.button("🚀 FORÇAR SAQUE AGORA"):
+    if pk_resgate:
         try:
-            acc = Account.from_key(pk_input)
-            saldo = W3.eth.get_balance(acc.address)
-            st.write(f"Endereço da Chave: `{acc.address}`")
-            st.write(f"Saldo encontrado: **{W3.from_wei(saldo, 'ether')} POL**")
+            # Limpa espaços e valida a chave
+            pk_limpa = pk_resgate.strip()
+            conta_origem = Account.from_key(pk_limpa)
             
-            if saldo > 0:
+            # Consulta saldo real
+            saldo_wei = W3.eth.get_balance(conta_origem.address)
+            saldo_pol = W3.from_wei(saldo_wei, 'ether')
+            
+            st.write(f"Verificando Sniper: `{conta_origem.address}`")
+            st.write(f"Saldo encontrado: **{saldo_pol} POL**")
+            
+            if saldo_wei > 0:
+                # Configuração de Gás Turbo
                 gas_price = int(W3.eth.gas_price * 2.0)
                 taxa = gas_price * 21000
+                
                 tx = {
-                    'nonce': W3.eth.get_transaction_count(acc.address),
-                    'to': W3.to_checksum_address(carteira_destino),
-                    'value': saldo - taxa,
+                    'nonce': W3.eth.get_transaction_count(conta_origem.address),
+                    'to': carteira_correta,
+                    'value': saldo_wei - taxa,
                     'gas': 21000,
                     'gasPrice': gas_price,
                     'chainId': 137
                 }
-                signed = W3.eth.account.sign_transaction(tx, pk_input)
-                h = W3.eth.send_raw_transaction(signed.raw_transaction)
-                st.success(f"✅ ENVIADO! Hash: {W3.to_hex(h)}")
+                
+                signed = W3.eth.account.sign_transaction(tx, pk_limpa)
+                tx_hash = W3.eth.send_raw_transaction(signed.raw_transaction)
+                
                 st.balloons()
+                st.success(f"✅ DINHEIRO ENVIADO! Hash: {W3.to_hex(tx_hash)}")
+                st.info("Verifique sua MetaMask na rede Polygon.")
             else:
-                st.error("Esta chave não tem saldo (POL) para sacar.")
+                st.error("Este Sniper está com saldo 0. Verifique se enviou o POL para o endereço correto.")
         except Exception as e:
-            st.error(f"Erro: {e}")
-
-st.divider()
-
-# 3. VERIFICADOR DE SALDO (RAIO-X)
-st.subheader("🔍 Raio-X de Endereço")
-addr_check = st.text_input("Cole o endereço do Sniper aqui para ver se o dinheiro está nele:")
-if st.button("Checar Saldo"):
-    try:
-        b = W3.from_wei(W3.eth.get_balance(addr_check), 'ether')
-        if b > 0:
-            st.success(f"O dinheiro ESTÁ aqui: {b} POL")
-            st.info("Para tirar, você precisa da Chave Privada deste endereço.")
-        else:
-            st.error("Saldo zero neste endereço.")
-    except: st.error("Endereço inválido.")
+            st.error(f"Erro na transação: {e}")
